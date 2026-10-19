@@ -46,6 +46,8 @@ export interface HudState {
   yaw: number;
   /** Seconds until respawn; -1 when there is nowhere to respawn. */
   respawnIn: number;
+  /** Point index the player picked to respawn at, or -1 (automatic). */
+  spawnChoice: number;
   killedBy: string;
   spread: number;
   aiming: boolean;
@@ -68,6 +70,9 @@ export interface HudCallbacks {
   onPlay: () => void;
   onQuit: () => void;
   onRestart: () => void;
+  /** Mouse sensitivity as a multiplier (1 = default). */
+  getSensitivity?: () => number;
+  setSensitivity?: (v: number) => void;
 }
 
 type T = (key: string, params?: Record<string, string | number>) => string;
@@ -126,6 +131,10 @@ const CSS = `
 .fps-dead{position:absolute;left:50%;top:58%;transform:translateX(-50%);text-align:center}
 .fps-dead .big{font-size:30px;font-weight:800;color:#f87171}
 .fps-dead .small{font-size:18px;opacity:.9;margin-top:6px}
+.fps-dead .pick{font-size:14px;opacity:.8;margin-top:14px}
+.fps-dead .spawns{display:flex;gap:8px;justify-content:center;margin-top:6px}
+.fps-dead .spawns span{padding:4px 10px;border:2px solid;border-radius:8px;font-weight:800;font-size:15px;background:rgba(0,0,0,.35)}
+.fps-dead .spawns span.on{background:rgba(255,255,255,.25)}
 .fps-score{left:50%;top:50%;transform:translate(-50%,-50%);padding:18px 22px;min-width:460px;display:none}
 .fps-score h3{margin:0 0 10px;font-size:18px;letter-spacing:.1em;text-transform:uppercase}
 .fps-score table{border-collapse:collapse;width:100%;font-size:15px}
@@ -144,6 +153,10 @@ const CSS = `
 .fps-card .team i{width:18px;height:18px;border-radius:4px;display:inline-block}
 .fps-card .keys{margin:14px 0 4px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.06);font-size:13px;line-height:1.7;text-align:left;opacity:.9}
 .fps-card .keys b{display:block;font-size:12px;letter-spacing:.14em;text-transform:uppercase;opacity:.7;margin-bottom:2px}
+.fps-card .sens{display:flex;align-items:center;gap:12px;margin:14px 0 0;font-size:14px;text-align:left}
+.fps-card .sens span{opacity:.8;white-space:nowrap}
+.fps-card .sens input{flex:1;accent-color:#3b82f6}
+.fps-card .sens b{min-width:40px;text-align:right}
 .fps-btns{display:flex;gap:10px;justify-content:center;margin-top:18px;flex-wrap:wrap}
 .fps-btn{pointer-events:auto;cursor:pointer;border:0;border-radius:10px;padding:12px 26px;font-size:16px;font-weight:800;letter-spacing:.06em;color:#fff;background:linear-gradient(180deg,#3b82f6,#2563eb);box-shadow:0 4px 14px rgba(37,99,235,.45);text-transform:uppercase}
 .fps-btn:hover{filter:brightness(1.12)}
@@ -333,6 +346,23 @@ export class FpsHud {
     const card = this.openOverlay();
     el("h1", "", card).textContent = this.t("fps.paused");
     this.controls(card);
+    if (this.cb.getSensitivity && this.cb.setSensitivity) {
+      const row = el("label", "sens", card);
+      const name = el("span", "", row);
+      name.textContent = this.t("fps.sensitivity");
+      const input = el("input", "", row);
+      input.type = "range";
+      input.min = "0.3";
+      input.max = "3";
+      input.step = "0.1";
+      input.value = String(this.cb.getSensitivity());
+      const val = el("b", "", row);
+      val.textContent = `${Number(input.value).toFixed(1)}×`;
+      input.addEventListener("input", () => {
+        val.textContent = `${Number(input.value).toFixed(1)}×`;
+        this.cb.setSensitivity?.(Number(input.value));
+      });
+    }
     const btns = el("div", "fps-btns", card);
     this.button(btns, this.t("fps.resume"), "go", () => this.cb.onPlay());
     this.button(btns, this.t("fps.quit"), "alt", () => this.cb.onQuit());
@@ -504,6 +534,21 @@ export class FpsHud {
       this.deadEl.innerHTML = "";
       el("div", "big", this.deadEl).textContent = big;
       el("div", "small", this.deadEl).textContent = small;
+      const owned = s.points
+        .map((p, i) => (p.owner === s.team ? i : -1))
+        .filter((i) => i >= 0);
+      if (s.respawnIn >= 0 && owned.length > 1) {
+        const pick = el("div", "pick", this.deadEl);
+        pick.textContent = this.t("fps.choose_spawn", {
+          keys: owned.map((i) => i + 1).join(" / "),
+        });
+        const row = el("div", "spawns", this.deadEl);
+        for (const i of owned) {
+          const b = el("span", s.spawnChoice === i ? "on" : "", row);
+          b.textContent = `${i + 1} · ${LETTERS[i % LETTERS.length]}`;
+          b.style.borderColor = this.teamCss(s.team);
+        }
+      }
     } else {
       this.deadEl.style.display = "none";
     }

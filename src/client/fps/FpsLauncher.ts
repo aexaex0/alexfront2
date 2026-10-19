@@ -3,7 +3,12 @@
 // the rest of the client (translations, map files) is passed in, so this
 // folder stays self-contained.
 
-import { Difficulty, FpsGame, FpsNationInput } from "./FpsGame";
+import {
+  BASE_SENSITIVITY,
+  Difficulty,
+  FpsGame,
+  FpsNationInput,
+} from "./FpsGame";
 import { TerrainSource } from "./FpsTerrain";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
@@ -560,6 +565,10 @@ export class FpsLauncher {
             container.remove();
             this.launch(player);
           },
+          onSensitivity: (v) => {
+            this.settings.sensitivity = v;
+            saveSettings(this.settings);
+          },
         },
       );
     } catch (e) {
@@ -570,7 +579,7 @@ export class FpsLauncher {
       return;
     }
     this.game = game;
-    game.setSensitivity(0.0022 * this.settings.sensitivity);
+    game.setSensitivity(BASE_SENSITIVITY * this.settings.sensitivity);
     this.setupEl?.remove();
     this.setupEl = null;
     this.ui = null;

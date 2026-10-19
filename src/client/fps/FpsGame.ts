@@ -60,6 +60,8 @@ export interface FpsDeps {
   t: (key: string, params?: Record<string, string | number>) => string;
   onExit: () => void;
   onRestart: () => void;
+  /** The player changed the mouse sensitivity (multiplier) in the pause menu. */
+  onSensitivity?: (v: number) => void;
 }
 
 interface Team {
@@ -201,6 +203,8 @@ const GRENADE_RADIUS = 7.5;
 const GRENADE_DAMAGE = 140;
 /** Seconds of protection right after (re)spawning. */
 const SPAWN_SHIELD = 1.5;
+/** Mouse look, radians per pixel, at sensitivity 1. */
+export const BASE_SENSITIVITY = 0.0022;
 /** A match lasts at most this long; then the nation with the most points wins. */
 const MATCH_TIME = 15 * 60;
 const NEUTRAL: [number, number, number] = [0.55, 0.55, 0.58];
@@ -273,6 +277,9 @@ export class FpsGame {
   private keys = new Set<string>();
   private mouseDown = false;
   private aiming = false;
+  /** The point the player asked to respawn at (number keys), or -1. */
+  private preferredSpawn = -1;
+  private killer: Soldier | null = null;
   /** Playing without pointer lock (unsupported browser, or tests). */
   private noLock = false;
   /** Smoothed eye height of the player (crouching lowers it). */
@@ -288,7 +295,7 @@ export class FpsGame {
   private hitMarker = 0;
   private damageFlash = 0;
   private killedBy = "";
-  private sensitivity = 0.0022;
+  private sensitivity = BASE_SENSITIVITY;
 
   // Frame scratch
   private view = mat4();
@@ -308,6 +315,8 @@ export class FpsGame {
   private tmpB = new Float32Array(16);
   private tmpC = new Float32Array(16);
   private teamTimer = 0;
+  private frameAvg = 16;
+  private adaptT = 0;
   private events: { text: string; at: number }[] = [];
   private feed: {
     killer: string;
@@ -389,6 +398,11 @@ export class FpsGame {
       onRestart: () => {
         this.dispose();
         deps.onRestart();
+      },
+      getSensitivity: () => this.sensitivity / BASE_SENSITIVITY,
+      setSensitivity: (v) => {
+        this.sensitivity = BASE_SENSITIVITY * v;
+        deps.onSensitivity?.(v);
       },
     });
 
@@ -513,6 +527,10 @@ export class FpsGame {
     if (initial) return this.points[s.team] ?? null;
     const owned = this.points.filter((p) => p.owner === s.team);
     if (owned.length === 0) return null;
+    if (s.isPlayer && this.preferredSpawn >= 0) {
+      const want = this.points[this.preferredSpawn];
+      if (want && want.owner === s.team) return want;
+    }
     // Not into a point that is being taken, unless there is no other.
     const safe = owned.filter((p) => !p.contested && p.capturer === s.team);
     const pool = safe.length > 0 ? safe : owned;
@@ -587,17 +605,20 @@ export class FpsGame {
     }
     if (this.state !== "playing") return;
     this.keys.add(e.code);
+    const digit = /^Digit([1-9])$/.exec(e.code);
+    if (digit && !this.player.alive) {
+      const i = Number(digit[1]) - 1;
+      if (i < this.points.length && this.points[i].owner === this.player.team) {
+        this.preferredSpawn = i;
+      }
+    }
     if (e.code === "KeyR") this.reload(this.player);
     if (e.code === "KeyG" && !e.repeat) this.throwGrenade(this.player);
-    if ((e.code === "KeyC" || e.code === "ControlLeft") && !e.repeat) {
+    if (e.code === "KeyC" && !e.repeat) {
       this.player.crouching = !this.player.crouching;
     }
     if (e.code === "Tab" && !e.repeat) this.hud.setScoreboard(true);
-    if (
-      ["Space", "Tab", "KeyW", "KeyA", "KeyS", "KeyD", "ControlLeft"].includes(
-        e.code,
-      )
-    ) {
+    if (["Space", "Tab", "KeyW", "KeyA", "KeyS", "KeyD"].includes(e.code)) {
       e.preventDefault();
     }
     e.stopPropagation();
@@ -727,6 +748,7 @@ export class FpsGame {
       this.raf = requestAnimationFrame(frame);
       const dt = Math.min(0.1, (now - this.lastFrame) / 1000);
       this.lastFrame = now;
+      this.adaptResolution(dt);
       if (this.state === "playing") {
         this.acc += dt;
         let steps = 0;
@@ -739,6 +761,24 @@ export class FpsGame {
       this.draw();
     };
     this.raf = requestAnimationFrame(frame);
+  }
+
+  /**
+   * Keeps the frame rate up on slow machines: renders fewer pixels when
+   * frames take too long, and more again when there is room.
+   */
+  private adaptResolution(dt: number): void {
+    if (this.state !== "playing" || dt <= 0) return;
+    this.frameAvg = this.frameAvg * 0.95 + dt * 1000 * 0.05;
+    this.adaptT += dt;
+    if (this.adaptT < 2.5) return;
+    this.adaptT = 0;
+    const r = this.renderer;
+    if (this.frameAvg > 24 && r.scale > 0.5) {
+      r.scale = Math.max(0.5, r.scale - 0.15);
+    } else if (this.frameAvg < 17.5 && r.scale < 1) {
+      r.scale = Math.min(1, r.scale + 0.1);
+    }
   }
 
   /** Advances the simulation (also used by tests). */
@@ -791,11 +831,19 @@ export class FpsGame {
     const targetEye = p.crouching ? CROUCH_EYE : EYE;
     this.eyeH += (targetEye - this.eyeH) * Math.min(1, dt * 12);
     if (!p.alive) {
+      // The camera turns to whoever got you.
+      const k = this.killer;
+      if (k && k.alive) {
+        const want = Math.atan2(-(k.x - p.x), -(k.z - p.z));
+        p.yaw += angleDiff(p.yaw, want) * Math.min(1, dt * 3);
+      }
       if (this.time >= p.respawnAt && p.respawnAt > 0) {
         if (this.spawn(p, false)) {
           this.hud.flash(this.deps.t("fps.respawned"));
+          this.killer = null;
         } else {
-          p.respawnAt = 0;
+          // Nowhere to come back yet: try again once a point is ours.
+          p.respawnAt = this.time + 1;
         }
       }
       return;
@@ -1529,6 +1577,7 @@ export class FpsGame {
     }
     if (victim.isPlayer) {
       this.killedBy = killer.name;
+      this.killer = killer;
       this.mouseDown = false;
     }
   }
@@ -2514,8 +2563,13 @@ export class FpsGame {
       yaw: p.yaw,
       respawnIn: p.alive
         ? 0
-        : p.respawnAt > 0
+        : this.points.some((pt) => pt.owner === p.team)
           ? Math.max(0, p.respawnAt - this.time)
+          : -1,
+      spawnChoice:
+        this.preferredSpawn >= 0 &&
+        this.points[this.preferredSpawn]?.owner === p.team
+          ? this.preferredSpawn
           : -1,
       killedBy: this.killedBy,
       spread: (this.aiming ? 0.2 : 1) * (1 + moving * 1.6) + this.bloom * 30,

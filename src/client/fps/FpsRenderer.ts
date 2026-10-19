@@ -119,11 +119,13 @@ void main() {
       else if (d < d2) { d2 = d; i2 = i; }
     }
     vec3 tc = uPointColors[i1];
-    col = mix(col, tc, 0.2);
+    // Territory colour on open ground only, not on cliff faces.
+    float level = smoothstep(0.55, 0.8, n.y);
+    col = mix(col, tc, 0.16 * level);
     // Borders only where two different owners meet.
     if (distance(uPointColors[i1], uPointColors[i2]) > 0.01) {
       float edge = d2 - d1;
-      col = mix(col, tc * 1.15 + 0.08, (1.0 - smoothstep(0.0, 1.6, edge)) * 0.75);
+      col = mix(col, tc * 1.15 + 0.08, (1.0 - smoothstep(0.0, 1.6, edge)) * 0.75 * level);
     }
     float r = uPoints[i1].z;
     float ring = 1.0 - smoothstep(0.0, 0.45, abs(d1 - r));
@@ -650,8 +652,11 @@ export class FpsRenderer {
     this.staticCount = count;
   }
 
+  /** Render resolution factor, lowered on slow machines (0.5..1). */
+  scale = 1;
+
   resize(): void {
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.25) * this.scale;
     const w = Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
     const h = Math.max(1, Math.floor(this.canvas.clientHeight * dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {

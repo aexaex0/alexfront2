@@ -851,6 +851,7 @@
   "fps": {
     "back": "Back",
     "capturing": "Capturing {name}",
+    "choose_spawn": "Pick where you respawn: {keys}",
     "click_again": "Click again to lock the mouse and play.",
     "click_hint": "The game locks your mouse; press Esc to get it back.",
     "contested": "Contested!",

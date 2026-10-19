@@ -2,7 +2,7 @@ name: Fork check
 
 on:
   push:
-    branches: [uj-funkciok]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

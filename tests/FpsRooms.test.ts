@@ -81,6 +81,20 @@ describe("FPS rooms", () => {
     expect(rooms.roomCount).toBe(0);
   });
 
+  test("a host can hand the room on, and only the host", () => {
+    const rooms = new FpsRooms();
+    const a = join(rooms);
+    const b = join(rooms);
+    const idA = a.sent[0].id as number;
+    const idB = b.sent[0].id as number;
+    rooms.message(b, JSON.stringify({ t: "yield" }));
+    expect(a.sent.some((m) => m.t === "host")).toBe(false);
+    rooms.message(a, JSON.stringify({ t: "yield" }));
+    expect(a.last()).toEqual({ t: "host", id: idB });
+    rooms.message(b, JSON.stringify({ t: "yield" }));
+    expect(b.last()).toEqual({ t: "host", id: idA });
+  });
+
   test("turns away a full room and strangers who skip hello", () => {
     const rooms = new FpsRooms();
     for (let i = 0; i < FPS_ROOM_SIZE; i++) join(rooms, "big");

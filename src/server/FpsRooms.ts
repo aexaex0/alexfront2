@@ -99,6 +99,15 @@ export class FpsRooms {
         if (member.id !== room.hostId) return;
         this.relay(member, raw, typeof m.to === "number" ? m.to : null);
         return;
+      case "yield": {
+        // The host steps aside (its tab went to the background, say): the
+        // next player in the room takes over the bots.
+        if (member.id !== room.hostId || room.members.length < 2) return;
+        const i = room.members.indexOf(member);
+        room.hostId = room.members[(i + 1) % room.members.length].id;
+        this.broadcast(room, { t: "host", id: room.hostId }, null);
+        return;
+      }
       case "s":
       case "e":
         this.relay(member, raw, typeof m.to === "number" ? m.to : null);

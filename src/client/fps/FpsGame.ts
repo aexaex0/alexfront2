@@ -318,6 +318,7 @@ export class FpsGame {
   private snapT = 0;
   private snapN = 0;
   private played = false;
+  private yieldTimer = 0;
 
   // Frame scratch
   private view = mat4();
@@ -457,6 +458,7 @@ export class FpsGame {
       net.events.onLeave = (id) => this.removePeer(id);
       net.events.onHost = (id) => {
         if (id === net.id) this.becomeHost();
+        else this.becomeGuest();
       };
       net.events.onClose = () => {
         this.hud.flash(deps.t("fps.connection_lost"));
@@ -762,6 +764,7 @@ export class FpsGame {
     document.addEventListener("pointerlockchange", this.onPointerLockChange);
     document.addEventListener("pointerlockerror", this.onPointerLockError);
     window.addEventListener("blur", this.onBlur);
+    document.addEventListener("visibilitychange", this.onVisibility);
   }
 
   private unbindInput(): void {
@@ -774,6 +777,8 @@ export class FpsGame {
     document.removeEventListener("pointerlockchange", this.onPointerLockChange);
     document.removeEventListener("pointerlockerror", this.onPointerLockError);
     window.removeEventListener("blur", this.onBlur);
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    clearTimeout(this.yieldTimer);
   }
 
   /** Locks the mouse to the game (from a click); the lock starts play. */
@@ -3140,6 +3145,36 @@ export class FpsGame {
     for (const s of this.soldiers) if (s.enemy === gone) s.enemy = null;
     if (this.killer === gone) this.killer = null;
   }
+
+  /** Someone else runs the bots now: ours become mirrors of theirs. */
+  private becomeGuest(): void {
+    for (const s of this.soldiers) {
+      if (s.isPlayer || s.peer || s.ghost) continue;
+      s.ghost = true;
+      s.tx = s.x;
+      s.ty = s.y;
+      s.tz = s.z;
+      s.tyaw = s.yaw;
+      s.tpitch = s.pitch;
+      s.seenShots = s.shots;
+    }
+  }
+
+  /**
+   * A host whose tab goes to the background stops simulating (browsers
+   * pause hidden pages), so after a moment it hands the bots to the next
+   * player in the room.
+   */
+  private onVisibility = () => {
+    clearTimeout(this.yieldTimer);
+    if (!document.hidden) return;
+    this.yieldTimer = window.setTimeout(() => {
+      const net = this.net;
+      if (document.hidden && net && net.isHost && net.peers.size > 0) {
+        net.send({ t: "yield" });
+      }
+    }, 2000);
+  };
 
   /** The host left (or the connection dropped): we run the bots now. */
   private becomeHost(): void {

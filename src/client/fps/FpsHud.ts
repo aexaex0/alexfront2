@@ -28,6 +28,7 @@ export interface HudFeedEntry {
   victim: string;
   vc: string;
   head: boolean;
+  grenade: boolean;
   at: number;
 }
 
@@ -37,6 +38,7 @@ export interface HudState {
   hp: number;
   ammo: number;
   reserve: number;
+  grenades: number;
   reloading: boolean;
   team: number;
   x: number;
@@ -58,6 +60,8 @@ export interface HudState {
   soldiers: { alive: number; points: number }[];
   playerKills: number;
   playerDeaths: number;
+  /** Seconds left in the match. */
+  timeLeft: number;
 }
 
 export interface HudCallbacks {
@@ -97,6 +101,7 @@ const CSS = `
 .fps-ammo{right:20px;bottom:20px;padding:10px 16px;text-align:right;min-width:170px}
 .fps-ammo .num{font-size:36px;font-weight:800;line-height:1}
 .fps-ammo .res{font-size:18px;opacity:.7;font-weight:600}
+.fps-ammo .gr{font-size:14px;color:#a3e635;letter-spacing:.2em;min-height:17px;margin-top:2px}
 .fps-ammo .rl{font-size:12px;letter-spacing:.14em;color:#fbbf24;text-transform:uppercase;height:15px}
 .fps-points{position:absolute;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:6px}
 .fps-pt{width:46px;height:46px;border-radius:9px;position:relative;overflow:hidden;border:2px solid rgba(255,255,255,.35);background:rgba(20,20,26,.6);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px}
@@ -105,7 +110,9 @@ const CSS = `
 .fps-pt.here{border-color:#fff;box-shadow:0 0 10px rgba(255,255,255,.7)}
 .fps-pt.contested{animation:fpsPulse .5s infinite alternate}
 @keyframes fpsPulse{from{border-color:#fff}to{border-color:#ef4444}}
-.fps-capture{position:absolute;top:72px;left:50%;transform:translateX(-50%);width:340px;text-align:center;font-weight:700;font-size:15px;letter-spacing:.04em}
+.fps-timer{position:absolute;top:64px;left:50%;transform:translateX(-50%);font-size:14px;font-weight:800;letter-spacing:.08em;opacity:.85}
+.fps-timer.low{color:#f87171;opacity:1}
+.fps-capture{position:absolute;top:86px;left:50%;transform:translateX(-50%);width:340px;text-align:center;font-weight:700;font-size:15px;letter-spacing:.04em}
 .fps-capture .fps-bar{height:10px;margin-top:5px}
 .fps-capture .fps-bar b{transition:none}
 .fps-minimap{left:16px;top:16px;width:200px;height:200px;padding:4px}
@@ -179,7 +186,10 @@ export class FpsHud {
   private ammoNum: HTMLSpanElement;
   private ammoRes: HTMLSpanElement;
   private ammoReload: HTMLDivElement;
+  private grenadeEl: HTMLDivElement;
   private pointsBox: HTMLDivElement;
+  private timerEl: HTMLDivElement;
+  private lastTimer = "";
   private pointEls: { box: HTMLDivElement; fill: HTMLDivElement }[] = [];
   private capture: HTMLDivElement;
   private captureText: HTMLDivElement;
@@ -199,6 +209,7 @@ export class FpsHud {
   private scoreVisible = false;
   private now = 0;
   private lastState: HudState | null = null;
+  private frame = 0;
 
   constructor(
     container: HTMLElement,
@@ -234,8 +245,10 @@ export class FpsHud {
     const line = el("div", "", ammo);
     this.ammoNum = el("span", "num", line);
     this.ammoRes = el("span", "res", line);
+    this.grenadeEl = el("div", "gr", ammo);
 
     this.pointsBox = el("div", "fps-points", root);
+    this.timerEl = el("div", "fps-timer", root);
     this.capture = el("div", "fps-capture", root);
     this.captureText = el("div", "", this.capture);
     const cbar = el("div", "fps-bar", this.capture);
@@ -333,6 +346,7 @@ export class FpsHud {
 
   showEnd(
     result: "victory" | "defeat",
+    timeUp: boolean,
     stats: { kills: number; deaths: number; time: number },
   ): void {
     this.setScoreboard(false);
@@ -340,9 +354,17 @@ export class FpsHud {
     const h = el("h1", "", card);
     h.textContent = this.t(result === "victory" ? "fps.victory" : "fps.defeat");
     h.style.color = result === "victory" ? "#4ade80" : "#f87171";
-    el("p", "", card).textContent = this.t(
-      result === "victory" ? "fps.victory_desc" : "fps.defeat_desc",
-    );
+    let desc: string;
+    if (timeUp) {
+      desc = this.t(
+        result === "victory" ? "fps.time_up_victory" : "fps.time_up_defeat",
+      );
+    } else {
+      desc = this.t(
+        result === "victory" ? "fps.victory_desc" : "fps.defeat_desc",
+      );
+    }
+    el("p", "", card).textContent = desc;
     el("p", "", card).textContent = this.t("fps.stats", {
       kills: stats.kills,
       deaths: stats.deaths,
@@ -432,12 +454,13 @@ export class FpsHud {
             ? "linear-gradient(90deg,#fde047,#f59e0b)"
             : "linear-gradient(90deg,#f87171,#dc2626)";
     }
-    const ammoKey = `${s.ammo}/${s.reserve}/${s.reloading}`;
+    const ammoKey = `${s.ammo}/${s.reserve}/${s.reloading}/${s.grenades}`;
     if (ammoKey !== this.lastAmmo) {
       this.lastAmmo = ammoKey;
       this.ammoNum.textContent = String(s.ammo);
       this.ammoNum.style.color = s.ammo <= 5 ? "#f87171" : "#fff";
       this.ammoRes.textContent = ` / ${s.reserve}`;
+      this.grenadeEl.textContent = "● ".repeat(s.grenades).trim();
       this.ammoReload.textContent = s.reloading
         ? this.t("fps.reloading")
         : s.ammo === 0 && s.reserve === 0
@@ -448,8 +471,15 @@ export class FpsHud {
     }
 
     this.updatePoints(s);
+    const timer = formatTime(Math.ceil(s.timeLeft));
+    if (timer !== this.lastTimer) {
+      this.lastTimer = timer;
+      this.timerEl.textContent = timer;
+      this.timerEl.classList.toggle("low", s.timeLeft < 60);
+    }
     this.updateCapture(s);
-    this.drawMinimap(s);
+    // The minimap needn't redraw every frame.
+    if (this.frame++ % 3 === 0) this.drawMinimap(s);
     this.updateFeed(s);
 
     // Name of whoever is under the crosshair.
@@ -559,7 +589,7 @@ export class FpsHud {
       k.textContent = f.killer;
       k.style.color = f.kc;
       const mid = el("span", "", row);
-      mid.textContent = f.head ? "  ⌖  " : "  ➜  ";
+      mid.textContent = f.grenade ? "  ✹  " : f.head ? "  ⌖  " : "  ➜  ";
       mid.style.opacity = "0.8";
       const v = el("span", "", row);
       v.textContent = f.victim;

@@ -87,6 +87,9 @@ interface Soldier {
   onGround: boolean;
   swimming: boolean;
   crouching: boolean;
+  grenades: number;
+  grenadeCd: number;
+  shieldUntil: number;
   hp: number;
   alive: boolean;
   diedAt: number;
@@ -158,6 +161,18 @@ interface Tracer {
   b: number;
 }
 
+interface Grenade {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  fuse: number;
+  spin: number;
+  owner: Soldier;
+}
+
 interface Hit {
   t: number;
   soldier: Soldier | null;
@@ -180,6 +195,14 @@ const HEADSHOT = 2.2;
 const PLAYER_RESPAWN = 4;
 const BOT_RESPAWN = 7;
 const CAPTURE_RATE = 0.22;
+const GRENADES = 3;
+const GRENADE_FUSE = 2.4;
+const GRENADE_RADIUS = 7.5;
+const GRENADE_DAMAGE = 140;
+/** Seconds of protection right after (re)spawning. */
+const SPAWN_SHIELD = 1.5;
+/** A match lasts at most this long; then the nation with the most points wins. */
+const MATCH_TIME = 15 * 60;
 const NEUTRAL: [number, number, number] = [0.55, 0.55, 0.58];
 const PALETTE: [number, number, number][] = [
   [0.22, 0.52, 1.0],
@@ -229,6 +252,13 @@ export class FpsGame {
   readonly soldiers: Soldier[] = [];
   readonly player: Soldier;
   private particles: Particle[] = [];
+  private grenadeList: Grenade[] = [];
+  /** Camera shake from nearby explosions, 0..1. */
+  private shake = 0;
+  /** Recent kills by the player, for double/triple kill callouts. */
+  private streak: number[] = [];
+  private stepPhase = 0;
+  private whizCd = 0;
   private tracers: Tracer[] = [];
   private nextId = 1;
   time = 0;
@@ -249,6 +279,8 @@ export class FpsGame {
   private eyeH = EYE;
   /** 0 (hip) .. 1 (aiming down the sights), smoothed. */
   private adsT = 0;
+  /** 0..1 while sprinting, smoothed (widens the view a little). */
+  private sprintT = 0;
   private bloom = 0;
   private recoilPitch = 0;
   private kick = 0;
@@ -283,6 +315,7 @@ export class FpsGame {
     victim: string;
     vc: string;
     head: boolean;
+    grenade: boolean;
     at: number;
   }[] = [];
 
@@ -444,6 +477,9 @@ export class FpsGame {
       onGround: true,
       swimming: false,
       crouching: false,
+      grenades: 0,
+      grenadeCd: 0,
+      shieldUntil: 0,
       hp: 100,
       alive: false,
       diedAt: -100,
@@ -524,6 +560,9 @@ export class FpsGame {
     s.reloadT = 0;
     s.fireCd = s.isPlayer ? 0 : -10;
     s.crouching = false;
+    s.grenades = s.isPlayer ? GRENADES : 1;
+    s.grenadeCd = s.isPlayer ? 0 : 3;
+    s.shieldUntil = this.time + SPAWN_SHIELD;
     s.enemy = null;
     s.goal = -1;
     // Face the map's middle.
@@ -549,6 +588,7 @@ export class FpsGame {
     if (this.state !== "playing") return;
     this.keys.add(e.code);
     if (e.code === "KeyR") this.reload(this.player);
+    if (e.code === "KeyG" && !e.repeat) this.throwGrenade(this.player);
     if ((e.code === "KeyC" || e.code === "ControlLeft") && !e.repeat) {
       this.player.crouching = !this.player.crouching;
     }
@@ -724,6 +764,7 @@ export class FpsGame {
       this.teamTimer = 1;
       this.refreshTeams();
     }
+    this.updateGrenades(dt);
     this.updateEffects(dt);
     this.checkEnd();
   }
@@ -738,7 +779,10 @@ export class FpsGame {
     this.kick = Math.max(0, this.kick - dt * 9);
     const adsTarget = this.aiming && p.alive && p.reloadT <= 0 ? 1 : 0;
     this.adsT += (adsTarget - this.adsT) * Math.min(1, dt * 14);
-    this.fov = 75 - 23 * this.adsT;
+    const sprinting =
+      p.alive && p.onGround && Math.hypot(p.vx, p.vz) > 6.5 && this.adsT < 0.1;
+    this.sprintT += ((sprinting ? 1 : 0) - this.sprintT) * Math.min(1, dt * 6);
+    this.fov = 75 - 23 * this.adsT + 6 * this.sprintT;
     // Recoil recovers over time.
     const rec = Math.min(this.recoilPitch, dt * 0.6);
     this.recoilPitch -= rec;
@@ -815,6 +859,19 @@ export class FpsGame {
     );
     if (here && p.reserve < RESERVE)
       p.reserve = Math.min(RESERVE, p.reserve + dt * 40);
+    p.grenadeCd -= dt;
+    if (here && p.grenades < GRENADES && p.grenadeCd <= -6) {
+      p.grenades++;
+      p.grenadeCd = 0;
+    }
+    // Footsteps.
+    if (p.onGround && len > 0) {
+      const phase = Math.floor(p.walk / Math.PI);
+      if (phase !== this.stepPhase) {
+        this.stepPhase = phase;
+        this.audio.step(sprint ? 0.5 : p.crouching ? 0.15 : 0.3);
+      }
+    }
   }
 
   private playerFire(): void {
@@ -827,8 +884,9 @@ export class FpsGame {
       moving * (this.aiming ? 0.006 : 0.022) +
       this.bloom +
       (p.onGround ? 0 : 0.04);
+    const steady = p.crouching && p.onGround ? 0.7 : 1;
     this.bloom = Math.min(0.035, this.bloom + (this.aiming ? 0.0016 : 0.0035));
-    const [dx, dy, dz] = this.spreadDir(p.yaw, p.pitch, spread);
+    const [dx, dy, dz] = this.spreadDir(p.yaw, p.pitch, spread * steady);
     const eye = this.eyeY(p);
     const hit = this.trace(p, p.x, eye, p.z, dx, dy, dz);
     const hx = p.x + dx * hit.t;
@@ -1135,6 +1193,13 @@ export class FpsGame {
     } else if (!enemy && s.ammo < MAG / 2 && s.reloadT <= 0) {
       this.reload(s);
     }
+    s.grenadeCd -= dt;
+    if (enemy && s.grenades > 0 && s.grenadeCd <= 0 && s.reactT <= 0) {
+      const d = Math.hypot(enemy.x - s.x, enemy.z - s.z);
+      if (d > 10 && d < 32 && this.rng.next() < dt * 0.25) {
+        this.botGrenade(s, enemy, d);
+      }
+    }
   }
 
   private think(s: Soldier): void {
@@ -1256,6 +1321,29 @@ export class FpsGame {
     );
     this.impact(hit, hx, hy, hz);
     if (hit.soldier) this.damage(hit.soldier, s, hit.head);
+    // A near miss on the player cracks past their ear.
+    const pl = this.player;
+    if (pl.alive && hit.soldier !== pl && this.whizCd <= 0) {
+      const ex = pl.x - s.x;
+      const ey = this.eyeY(pl) - eye;
+      const ez = pl.z - s.z;
+      const along = ex * dx + ey * dy + ez * dz;
+      if (along > 3 && along < hit.t) {
+        const miss = Math.hypot(
+          ex - dx * along,
+          ey - dy * along,
+          ez - dz * along,
+        );
+        if (miss < 1.6) {
+          this.whizCd = 0.25;
+          const ang = angleDiff(
+            pl.yaw,
+            Math.atan2(-(s.x - pl.x), -(s.z - pl.z)),
+          );
+          this.audio.whiz(clamp(-Math.sin(ang), -1, 1));
+        }
+      }
+    }
     // Sound, quieter and panned by where it came from.
     const p = this.player;
     const pd = Math.hypot(s.x - p.x, s.z - p.z);
@@ -1344,8 +1432,15 @@ export class FpsGame {
     return best;
   }
 
-  private damage(victim: Soldier, attacker: Soldier, head: boolean): void {
-    let dmg = DAMAGE * (head ? HEADSHOT : 1);
+  private damage(
+    victim: Soldier,
+    attacker: Soldier,
+    head: boolean,
+    amount = DAMAGE * (head ? HEADSHOT : 1),
+    grenade = false,
+  ): void {
+    if (this.time < victim.shieldUntil) return;
+    let dmg = amount;
     if (victim.isPlayer && !attacker.isPlayer) dmg *= this.diff.dmg;
     victim.hp -= dmg;
     victim.lastHurt = this.time;
@@ -1368,10 +1463,17 @@ export class FpsGame {
       victim.enemy = attacker;
       victim.reactT = this.diff.react * 0.8;
     }
-    if (victim.hp <= 0 && victim.alive) this.kill(victim, attacker, head);
+    if (victim.hp <= 0 && victim.alive) {
+      this.kill(victim, attacker, head, grenade);
+    }
   }
 
-  private kill(victim: Soldier, killer: Soldier, head: boolean): void {
+  private kill(
+    victim: Soldier,
+    killer: Soldier,
+    head: boolean,
+    grenade = false,
+  ): void {
     victim.alive = false;
     victim.hp = 0;
     victim.diedAt = this.time;
@@ -1386,6 +1488,7 @@ export class FpsGame {
       victim: victim.isPlayer ? this.opts.playerName : victim.name,
       vc: this.teams[victim.team].css,
       head,
+      grenade,
       at: this.time,
     });
     if (this.feed.length > 6) this.feed.shift();
@@ -1414,11 +1517,191 @@ export class FpsGame {
           name: victim.name,
         }),
       );
+      // Several kills in quick succession get a callout.
+      this.streak = this.streak.filter((t) => this.time - t < 4);
+      this.streak.push(this.time);
+      if (this.streak.length === 2)
+        this.hud.flash(this.deps.t("fps.double_kill"));
+      if (this.streak.length === 3)
+        this.hud.flash(this.deps.t("fps.triple_kill"));
+      if (this.streak.length >= 4)
+        this.hud.flash(this.deps.t("fps.multi_kill"));
     }
     if (victim.isPlayer) {
       this.killedBy = killer.name;
       this.mouseDown = false;
     }
+  }
+
+  // --------------------------------------------------------------- grenades
+
+  private throwGrenade(s: Soldier): void {
+    if (!s.alive || s.grenades <= 0 || (s.isPlayer && s.grenadeCd > 0)) return;
+    if (this.state !== "playing") return;
+    s.grenades--;
+    s.grenadeCd = 1;
+    const [fx, fy, fz] = forward(s.yaw, s.pitch + 0.12);
+    const speed = 17;
+    this.launchGrenade(
+      s,
+      fx * speed + s.vx,
+      fy * speed + s.vy * 0.5,
+      fz * speed + s.vz,
+    );
+    if (s.isPlayer) this.audio.throwSound();
+  }
+
+  /** A bot lobs a grenade in an arc to land near its target. */
+  private botGrenade(s: Soldier, target: Soldier, d: number): void {
+    s.grenades--;
+    s.grenadeCd = 6;
+    const angle = 0.6;
+    const v =
+      Math.sqrt((d * GRAVITY) / Math.sin(2 * angle)) *
+      (0.9 + this.rng.next() * 0.2);
+    const dx = (target.x - s.x) / d;
+    const dz = (target.z - s.z) / d;
+    const h = Math.cos(angle) * v;
+    this.launchGrenade(s, dx * h, Math.sin(angle) * v, dz * h);
+  }
+
+  private launchGrenade(s: Soldier, vx: number, vy: number, vz: number): void {
+    const [fx, , fz] = forward(s.yaw, 0);
+    this.grenadeList.push({
+      x: s.x + fx * 0.5,
+      y: this.eyeY(s) - 0.1,
+      z: s.z + fz * 0.5,
+      vx,
+      vy,
+      vz,
+      fuse: GRENADE_FUSE,
+      spin: 0,
+      owner: s,
+    });
+  }
+
+  private updateGrenades(dt: number): void {
+    const t = this.terrain;
+    for (const g of this.grenadeList) {
+      g.fuse -= dt;
+      g.spin += dt * 9;
+      g.vy -= GRAVITY * dt;
+      let nx = g.x + g.vx * dt;
+      let nz = g.z + g.vz * dt;
+      const ny = g.y + g.vy * dt;
+      // Bounce off houses and cliffs sideways.
+      const house = this.world.houseAt(nx, nz, 0.1);
+      if ((house && ny < house.maxY) || !t.passable(nx, nz)) {
+        nx = g.x;
+        nz = g.z;
+        g.vx *= -0.4;
+        g.vz *= -0.4;
+      }
+      g.x = nx;
+      g.z = nz;
+      g.y = ny;
+      const ground = t.heightAt(g.x, g.z);
+      if (g.y < ground + 0.06) {
+        g.y = ground + 0.06;
+        if (g.vy < -1.5) this.audio.bounce();
+        g.vy = Math.abs(g.vy) * 0.3;
+        g.vx *= 0.55;
+        g.vz *= 0.55;
+      }
+      if (g.y < WATER_LEVEL) {
+        g.vx *= 0.9;
+        g.vz *= 0.9;
+        g.vy *= 0.9;
+      }
+      if (g.fuse <= 0) this.explode(g);
+    }
+    this.grenadeList = this.grenadeList.filter((g) => g.fuse > 0);
+  }
+
+  private explode(g: Grenade): void {
+    const underwater = g.y < WATER_LEVEL - 0.3;
+    // Fireball, smoke and dirt.
+    for (let i = 0; i < (underwater ? 0 : 26); i++) {
+      const a = this.rng.next() * Math.PI * 2;
+      const r = this.rng.next() * 4;
+      this.addParticle(
+        g.x,
+        g.y + 0.4,
+        g.z,
+        Math.cos(a) * r,
+        1 + this.rng.next() * 4,
+        Math.sin(a) * r,
+        0.35 + this.rng.next() * 0.3,
+        -(0.9 + this.rng.next() * 1.2),
+        1,
+        0.55 + this.rng.next() * 0.3,
+        0.15,
+        1,
+        true,
+        -1,
+      );
+    }
+    for (let i = 0; i < 22; i++) {
+      const a = this.rng.next() * Math.PI * 2;
+      const r = this.rng.next() * 2.5;
+      const c = underwater ? 0.85 : 0.25 + this.rng.next() * 0.2;
+      this.addParticle(
+        g.x,
+        g.y + 0.6,
+        g.z,
+        Math.cos(a) * r,
+        1.5 + this.rng.next() * (underwater ? 7 : 2.5),
+        Math.sin(a) * r,
+        1.4 + this.rng.next() * 1.4,
+        1.1 + this.rng.next() * 0.9,
+        c,
+        c,
+        underwater ? 0.95 : c,
+        0.75,
+        false,
+        underwater ? 8 : -0.6,
+      );
+    }
+    for (let i = 0; i < 14; i++) {
+      this.addParticle(
+        g.x,
+        g.y + 0.2,
+        g.z,
+        (this.rng.next() - 0.5) * 9,
+        3 + this.rng.next() * 6,
+        (this.rng.next() - 0.5) * 9,
+        0.8 + this.rng.next() * 0.5,
+        0.09,
+        0.32,
+        0.25,
+        0.16,
+        1,
+        false,
+        16,
+      );
+    }
+    // Damage everyone around (but not teammates), unless sheltered.
+    for (const s of this.soldiers) {
+      if (!s.alive) continue;
+      if (s.team === g.owner.team && s !== g.owner) continue;
+      const cy = this.chestY(s);
+      const d = Math.hypot(s.x - g.x, cy - g.y, s.z - g.z);
+      if (d >= GRENADE_RADIUS) continue;
+      if (this.world.raycastHouses(g.x, g.y + 0.3, g.z, s.x, cy, s.z) >= 0)
+        continue;
+      if (this.terrain.raycast(g.x, g.y + 0.3, g.z, s.x, cy, s.z) >= 0)
+        continue;
+      const k = 1 - d / GRENADE_RADIUS;
+      this.damage(s, g.owner, false, 30 + (GRENADE_DAMAGE - 30) * k, true);
+    }
+    // Sound and a shake for the player, by distance.
+    const p = this.player;
+    const pd = Math.hypot(p.x - g.x, p.z - g.z);
+    if (pd < 260) {
+      const ang = angleDiff(p.yaw, Math.atan2(-(g.x - p.x), -(g.z - p.z)));
+      this.audio.boom(clamp(1 - pd / 260, 0, 1), clamp(-Math.sin(ang), -1, 1));
+    }
+    this.shake = Math.max(this.shake, clamp(1 - pd / 30, 0, 1));
   }
 
   private impact(hit: Hit, x: number, y: number, z: number): void {
@@ -1595,21 +1878,32 @@ export class FpsGame {
     if (this.state === "ended") return;
     const mine = this.player.team;
     if (this.points.every((p) => p.owner === mine)) {
-      this.end("victory");
+      this.end("victory", false);
       return;
     }
     const ownsAny = this.points.some(
       (p) => p.owner === mine || p.capturer === mine,
     );
-    if (!this.player.alive && !ownsAny) this.end("defeat");
+    if (!this.player.alive && !ownsAny) {
+      this.end("defeat", false);
+      return;
+    }
+    if (this.time >= MATCH_TIME) {
+      // Time's up: you win only if no other nation holds as many points.
+      const held = this.teams.map(
+        (_, ti) => this.points.filter((p) => p.owner === ti).length,
+      );
+      const best = Math.max(...held.filter((_, ti) => ti !== mine));
+      this.end(held[mine] > best ? "victory" : "defeat", true);
+    }
   }
 
-  private end(result: "victory" | "defeat"): void {
+  private end(result: "victory" | "defeat", timeUp: boolean): void {
     this.state = "ended";
     this.result = result;
     this.mouseDown = false;
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
-    this.hud.showEnd(result, {
+    this.hud.showEnd(result, timeUp, {
       kills: this.player.kills,
       deaths: this.player.deaths,
       time: this.time,
@@ -1671,6 +1965,8 @@ export class FpsGame {
   }
 
   private updateEffects(dt: number): void {
+    this.shake = Math.max(0, this.shake - dt * 2.2);
+    this.whizCd -= dt;
     for (const p of this.particles) {
       p.life -= dt;
       p.vy -= p.grav * dt;
@@ -1729,6 +2025,30 @@ export class FpsGame {
     arr[o + 17] = g;
     arr[o + 18] = b;
     arr[o + 19] = a;
+  }
+
+  private sprite(
+    x: number,
+    y: number,
+    z: number,
+    size: number,
+    r: number,
+    g: number,
+    b: number,
+    a: number,
+    additive: boolean,
+  ): void {
+    if (this.spriteCount >= 2048) return;
+    const o = this.spriteCount * SPRITE_STRIDE;
+    this.sprites[o] = x;
+    this.sprites[o + 1] = y;
+    this.sprites[o + 2] = z;
+    this.sprites[o + 3] = additive ? -size : size;
+    this.sprites[o + 4] = r;
+    this.sprites[o + 5] = g;
+    this.sprites[o + 6] = b;
+    this.sprites[o + 7] = a;
+    this.spriteCount++;
   }
 
   private drawSoldier(s: Soldier): void {
@@ -2013,7 +2333,18 @@ export class FpsGame {
           0.035 *
           Math.min(1, Math.hypot(p.vx, p.vz) / 5)
         : 0;
-    fpsView(this.view, p.x, camY + bob, p.z, p.yaw, camPitch);
+    // Explosions nearby shake the view.
+    const sh = this.shake * this.shake * 0.05;
+    const shY = sh ? (this.rng.next() - 0.5) * sh : 0;
+    const shYaw = sh ? (this.rng.next() - 0.5) * sh : 0;
+    fpsView(
+      this.view,
+      p.x,
+      camY + bob + shY,
+      p.z,
+      p.yaw + shYaw,
+      camPitch + shY,
+    );
     const aspect =
       this.canvas.clientWidth / Math.max(1, this.canvas.clientHeight);
     perspective(this.proj, (this.fov * Math.PI) / 180, aspect, 0.1, 1400);
@@ -2044,6 +2375,29 @@ export class FpsGame {
         color[0],
         color[1],
         color[2],
+      );
+    }
+
+    // Markers: a beacon over every point (owner's colour) and a small
+    // diamond over each teammate, so friend and foe are easy to tell apart.
+    for (const pt of this.points) {
+      const c = pt.owner >= 0 ? this.teams[pt.owner].color : NEUTRAL;
+      this.sprite(pt.x, pt.y + 10.5, pt.z, 0.75, c[0], c[1], c[2], 0.95, false);
+    }
+    const mine = this.teams[p.team].color;
+    for (const s of this.soldiers) {
+      if (!s.alive || s.isPlayer || s.team !== p.team) continue;
+      if (Math.hypot(s.x - p.x, s.z - p.z) > 140) continue;
+      this.sprite(
+        s.x,
+        s.y + 2.25,
+        s.z,
+        0.13,
+        mine[0],
+        mine[1],
+        mine[2],
+        0.9,
+        true,
       );
     }
 
@@ -2081,6 +2435,23 @@ export class FpsGame {
         o,
       );
       this.tracerCount++;
+    }
+    for (const g of this.grenadeList) {
+      this.box(
+        "world",
+        g.x,
+        g.y,
+        g.z,
+        g.spin,
+        g.spin * 0.7,
+        0,
+        0.13,
+        0.17,
+        0.13,
+        0.2,
+        0.26,
+        0.14,
+      );
     }
     this.drawViewModel();
 
@@ -2135,6 +2506,7 @@ export class FpsGame {
       hp: Math.max(0, Math.round(p.hp)),
       ammo: p.ammo,
       reserve: Math.floor(p.reserve),
+      grenades: p.grenades,
       reloading: p.reloadT > 0,
       team: p.team,
       x: p.x,
@@ -2182,6 +2554,7 @@ export class FpsGame {
       })),
       playerKills: p.kills,
       playerDeaths: p.deaths,
+      timeLeft: Math.max(0, MATCH_TIME - this.time),
     };
   }
 

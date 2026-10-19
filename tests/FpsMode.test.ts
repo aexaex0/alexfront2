@@ -1,7 +1,7 @@
 // The FPS mode's world logic (no WebGL needed): terrain built from map
 // bytes, bot navigation, houses and the battlefield crop.
 
-import { prepareBattle } from "../src/client/fps/FpsLauncher";
+import { prepareBattle, reachableLand } from "../src/client/fps/FpsLauncher";
 import { forward, fpsView, mat4 } from "../src/client/fps/FpsMath";
 import { Cell, FpsNav, FpsTerrain } from "../src/client/fps/FpsTerrain";
 import { FpsWorld, segmentBox } from "../src/client/fps/FpsWorld";
@@ -174,6 +174,37 @@ describe("FPS battlefield", () => {
     const b = prepareBattle(map, 1, 3);
     expect(b.playerNation).toBe(0);
     expect(b.nations.map((n) => n.name)).toEqual(["B", "D", "A"]);
+  });
+
+  test("prefers neighbours across a river to ones across the sea", () => {
+    // Left island | sea (deep water) | right island with a thin river.
+    const w = 60;
+    const h = 20;
+    const bytes = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let v = LAND | 2;
+        if (x >= 20 && x < 30) v = 12; // open sea
+        if (x === 45) v = 1; // a river one tile wide
+        bytes[y * w + x] = v;
+      }
+    }
+    const island = {
+      terrain: { bytes, width: w, height: h },
+      fullWidth: w,
+      fullHeight: h,
+      nations: [
+        { name: "Home", x: 35, y: 10, strength: 1 },
+        { name: "Overseas", x: 18, y: 10, strength: 1 },
+        { name: "Upriver", x: 55, y: 10, strength: 1 },
+      ],
+    };
+    const reach = reachableLand(island, island.nations[0]);
+    expect(reach(island.nations[1])).toBe(false);
+    expect(reach(island.nations[2])).toBe(true);
+    // Overseas is nearer, but the walkable neighbour comes first.
+    const b = prepareBattle(island, 0, 2);
+    expect(b.nations.map((n) => n.name)).toEqual(["Home", "Upriver"]);
   });
 
   test("crops the map around the chosen nations", () => {

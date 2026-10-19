@@ -40,9 +40,21 @@ async function loadMap(key: string): Promise<FpsLoadedMap> {
   };
 }
 
+/** Translations load in the background; a #fps link can be faster. */
+async function translationsReady(): Promise<void> {
+  for (let i = 0; i < 40 && translateText("fps.title") === "fps.title"; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+let opening = false;
+
 /** Opens the FPS mode's setup screen over the page. */
-export function launchFps(playerName: string): void {
-  if (launcher) return;
+export async function launchFps(playerName: string): Promise<void> {
+  if (launcher || opening) return;
+  opening = true;
+  await translationsReady();
+  opening = false;
   launcher = new FpsLauncher({
     t: translateText,
     maps: maps.map((m) => ({

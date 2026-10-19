@@ -670,6 +670,18 @@ class Client {
     // Tutorial entry points (play-page card, help page): back to the play page
     // if needed (so a username problem is visible), then a default solo game
     // with the guide on.
+    // AlexFront 2: the FPS mode (src/client/fps) loads only when opened,
+    // from the menu card or a link ending in #fps.
+    document.addEventListener("open-fps", () => {
+      const name = this.usernameInput?.getUsername() ?? "";
+      import("./fps/FpsEntry").then(
+        ({ launchFps }) => launchFps(name),
+        (err) => console.error("FPS mode failed to load:", err),
+      );
+    });
+    if (location.hash === "#fps") {
+      document.dispatchEvent(new CustomEvent("open-fps"));
+    }
     document.addEventListener("start-daily-challenge", () => {
       if (this.usernameInput && !this.usernameInput.canPlay()) return;
       whenModalLoaded("single-player-modal", () => {

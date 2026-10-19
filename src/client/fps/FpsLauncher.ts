@@ -68,6 +68,74 @@ function saveSettings(s: Settings): void {
 }
 
 /**
+ * Which nations stand on land connected to `from`'s, on the 4x terrain:
+ * land tiles and shallow water (rivers, straits a few tiles wide) connect,
+ * open sea and impassable tiles don't.
+ */
+export function reachableLand(
+  map: FpsLoadedMap,
+  from: FpsNationInput,
+): (n: FpsNationInput) => boolean {
+  const { bytes, width: w, height: h } = map.terrain;
+  const fx = w / map.fullWidth;
+  const fy = h / map.fullHeight;
+  const ok = (k: number) => {
+    const b = bytes[k];
+    const mag = b & 0x1f;
+    return b & 0x80 ? mag !== 31 : mag <= 3;
+  };
+  /** The nearest walkable tile to a nation's spot, or -1. */
+  const tileOf = (n: FpsNationInput) => {
+    const cx = Math.min(w - 1, Math.max(0, Math.round(n.x * fx)));
+    const cy = Math.min(h - 1, Math.max(0, Math.round(n.y * fy)));
+    for (let r = 0; r <= 6; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const x = cx + dx;
+          const y = cy + dy;
+          if (x < 0 || y < 0 || x >= w || y >= h) continue;
+          if (ok(y * w + x)) return y * w + x;
+        }
+      }
+    }
+    return -1;
+  };
+  const start = tileOf(from);
+  if (start < 0) return () => true;
+  const seen = new Uint8Array(w * h);
+  const queue = new Int32Array(w * h);
+  let head = 0;
+  let tail = 0;
+  seen[start] = 1;
+  queue[tail++] = start;
+  while (head < tail) {
+    const k = queue[head++];
+    const x = k % w;
+    const y = (k - x) / w;
+    if (x > 0 && !seen[k - 1] && ok(k - 1)) {
+      seen[k - 1] = 1;
+      queue[tail++] = k - 1;
+    }
+    if (x < w - 1 && !seen[k + 1] && ok(k + 1)) {
+      seen[k + 1] = 1;
+      queue[tail++] = k + 1;
+    }
+    if (y > 0 && !seen[k - w] && ok(k - w)) {
+      seen[k - w] = 1;
+      queue[tail++] = k - w;
+    }
+    if (y < h - 1 && !seen[k + w] && ok(k + w)) {
+      seen[k + w] = 1;
+      queue[tail++] = k + w;
+    }
+  }
+  return (n) => {
+    const k = tileOf(n);
+    return k >= 0 && seen[k] === 1;
+  };
+}
+
+/**
  * The battlefield: your nation plus its nearest neighbours, and the part of
  * the map around them (so the points are a walk apart, not a day's march).
  * Your nation comes first in the returned list.
@@ -78,10 +146,17 @@ export function prepareBattle(
   count: number,
 ): FpsBattle {
   const me = map.nations[player];
+  // Neighbours you can walk to (rivers are fine, seas are not) come first.
+  const reach = reachableLand(map, me);
   const others = map.nations
-    .map((n, i) => ({ n, i, d: Math.hypot(n.x - me.x, n.y - me.y) }))
+    .map((n, i) => ({
+      n,
+      i,
+      d: Math.hypot(n.x - me.x, n.y - me.y),
+      land: reach(n),
+    }))
     .filter((o) => o.i !== player)
-    .sort((a, b) => a.d - b.d)
+    .sort((a, b) => Number(b.land) - Number(a.land) || a.d - b.d)
     .slice(0, Math.max(1, count - 1))
     .map((o) => o.n);
   const chosen = [me, ...others];
@@ -145,6 +220,7 @@ const CSS = `
 .fps-setup h1{margin:0;font-size:40px;font-weight:900;letter-spacing:.03em;text-align:center}
 .fps-setup h1 span{color:#60a5fa}
 .fps-setup h2{margin:2px 0 8px;text-align:center;font-size:14px;letter-spacing:.35em;text-transform:uppercase;opacity:.65;font-weight:700}
+.fps-setup p.warn{color:#fbbf24;font-weight:700}
 .fps-setup p.desc{margin:0 0 18px;text-align:center;opacity:.85;line-height:1.45;font-size:15px}
 .fps-setup label{display:block;font-size:12px;letter-spacing:.14em;text-transform:uppercase;opacity:.7;margin:14px 0 6px;font-weight:700}
 .fps-setup select,.fps-setup input[type=range]{width:100%}
@@ -237,6 +313,9 @@ export class FpsLauncher {
     add("span", "", h1).textContent = "FPS";
     add("h2").textContent = this.t("fps.subtitle");
     add("p", "desc").textContent = this.t("fps.setup_desc");
+    if (this.touchOnly()) {
+      add("p", "desc warn").textContent = this.t("fps.desktop_only");
+    }
 
     add("label").textContent = this.t("fps.map");
     const map = add("select");
@@ -344,6 +423,18 @@ export class FpsLauncher {
     }
     if (this.loaded && this.loadedKey === this.settings.map) this.fillNations();
     else void this.loadSelectedMap();
+  }
+
+  /** Phones and tablets: no mouse and keyboard to play with. */
+  private touchOnly(): boolean {
+    try {
+      return (
+        matchMedia("(pointer: coarse)").matches &&
+        !matchMedia("(pointer: fine)").matches
+      );
+    } catch {
+      return false;
+    }
   }
 
   private webgl2(): boolean {

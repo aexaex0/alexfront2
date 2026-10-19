@@ -184,7 +184,22 @@ uniform vec3 uCam;
 uniform vec3 uSunDir;
 uniform vec3 uHorizon;
 uniform vec3 uZenith;
+uniform float uTime;
 out vec4 frag;
+float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float n2(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), f.x),
+             mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 5; i++) { v += a * n2(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
 void main() {
   vec4 p = uInvViewProj * vec4(vNdc, 1.0, 1.0);
   vec3 dir = normalize(p.xyz / p.w - uCam);
@@ -192,6 +207,14 @@ void main() {
   vec3 col = mix(uHorizon, uZenith, pow(t, 0.6));
   float s = max(dot(dir, uSunDir), 0.0);
   col += vec3(1.0, 0.92, 0.7) * (pow(s, 600.0) * 2.0 + pow(s, 12.0) * 0.18);
+  if (dir.y > 0.02) {
+    // A layer of drifting clouds, thinning toward the horizon.
+    vec2 uv = dir.xz / dir.y * 1.6 + vec2(uTime * 0.012, uTime * 0.004);
+    float c = smoothstep(0.5, 0.82, fbm(uv));
+    float fade = smoothstep(0.02, 0.25, dir.y);
+    vec3 cloud = mix(vec3(0.82, 0.85, 0.9), vec3(1.0), smoothstep(0.5, 0.9, fbm(uv + 0.3)));
+    col = mix(col, cloud, c * fade * 0.85);
+  }
   if (dir.y < 0.0) col = mix(uHorizon, uHorizon * 0.85, clamp(-dir.y * 3.0, 0.0, 1.0));
   frag = vec4(col, 1.0);
 }`;
@@ -467,6 +490,7 @@ export class FpsRenderer {
       "uSunDir",
       "uHorizon",
       "uZenith",
+      "uTime",
     ]);
     this.uB = uniforms(gl, this.boxProg, common);
     this.uSp = uniforms(gl, this.spriteProg, ["uViewProj", "uRight", "uUp"]);
@@ -700,6 +724,7 @@ export class FpsRenderer {
       SKY_HORIZON[2],
     );
     gl.uniform3f(this.uS.uZenith, SKY_ZENITH[0], SKY_ZENITH[1], SKY_ZENITH[2]);
+    gl.uniform1f(this.uS.uTime, f.time);
     gl.bindVertexArray(this.emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 

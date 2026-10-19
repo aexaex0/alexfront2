@@ -453,8 +453,6 @@ export class GameModeSelector extends LitElement {
     if (usernameInput) {
       this.inputValid = usernameInput.canPlay();
     }
-    // A shared link straight into the FPS mode.
-    if (location.hash === "#fps") this.openFps();
   }
 
   disconnectedCallback() {
@@ -875,15 +873,9 @@ export class GameModeSelector extends LitElement {
     window.showPage?.("page-detailed-view");
   };
 
-  /** AlexFront 2: the first-person mode, loaded on demand. */
+  /** AlexFront 2: the first-person mode. Handled in Main, which loads it. */
   private openFps = () => {
-    const usernameInput = document.querySelector(
-      "username-input",
-    ) as UsernameInput | null;
-    const name = usernameInput?.getUsername() ?? "";
-    void import("./fps/FpsEntry")
-      .then(({ launchFps }) => launchFps(name))
-      .catch((e) => console.error("Could not load the FPS mode", e));
+    document.dispatchEvent(new CustomEvent("open-fps"));
   };
 
   private renderFpsCard() {
@@ -891,11 +883,11 @@ export class GameModeSelector extends LitElement {
       <button
         type="button"
         @click=${this.openFps}
-        class="group relative block w-full h-full min-h-48 overflow-hidden rounded-2xl border border-white/15 text-left text-white shadow-2xl transition-transform duration-200 hover:scale-[1.01]"
+        class="fps-card group/fps relative block w-full h-full min-h-48 overflow-hidden rounded-2xl border border-white/15 text-left text-white shadow-2xl transition-transform duration-200 hover:scale-[1.01]"
         style="background: radial-gradient(ellipse at 78% 35%, rgba(96,165,250,0.5), transparent 55%), radial-gradient(ellipse at 10% 100%, rgba(239,68,68,0.4), transparent 55%), linear-gradient(135deg, #0b1324, #111827 55%, #1e293b);"
       >
         <span
-          class="pointer-events-none absolute right-[8%] top-1/2 -translate-y-1/2 size-36 sm:size-48 rounded-full border-4 border-white/25 transition-transform duration-500 group-hover:rotate-90"
+          class="pointer-events-none absolute right-[8%] top-1/2 -translate-y-1/2 size-36 sm:size-48 rounded-full border-4 border-white/25 transition-transform duration-500 group-hover/fps:rotate-90"
         >
           <span
             class="absolute left-1/2 top-[-18%] h-[136%] w-1 -translate-x-1/2 bg-white/25"
@@ -919,7 +911,7 @@ export class GameModeSelector extends LitElement {
             >${translateText("fps.menu_desc")}</span
           >
           <span
-            class="mt-2 self-start rounded-xl bg-green-500 px-6 py-3 text-lg font-black uppercase tracking-wider shadow-lg transition-colors group-hover:bg-green-400"
+            class="mt-2 self-start rounded-xl bg-green-500 px-6 py-3 text-lg font-black uppercase tracking-wider shadow-lg transition-colors group-hover/fps:bg-green-400"
             >▶ ${translateText("fps.play")}</span
           >
         </span>

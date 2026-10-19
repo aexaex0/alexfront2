@@ -187,6 +187,56 @@ export class FpsAudio {
     });
   }
 
+  step(volume: number): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const at = ctx.currentTime;
+    this.noiseBurst(ctx, this.master!, at, 0.07, 0.18 * volume, "lowpass", 700);
+  }
+
+  /** A bullet passing close by. */
+  whiz(pan: number): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const at = ctx.currentTime;
+    const dest = this.out(ctx, pan);
+    this.noiseBurst(ctx, dest, at, 0.09, 0.35, "bandpass", 3200, 2);
+    this.tone(ctx, dest, at, 0.08, 0.06, 2600, 1200, "sawtooth");
+  }
+
+  boom(volume: number, pan: number): void {
+    const ctx = this.ready();
+    if (!ctx || volume <= 0.01) return;
+    const at = ctx.currentTime;
+    const dest = this.out(ctx, pan);
+    this.noiseBurst(ctx, dest, at, 0.9, 1.0 * volume, "lowpass", 700);
+    this.noiseBurst(ctx, dest, at, 0.25, 0.6 * volume, "lowpass", 2500);
+    this.tone(ctx, dest, at, 0.6, 0.9 * volume, 90, 28);
+  }
+
+  bounce(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    this.tone(
+      ctx,
+      this.master!,
+      ctx.currentTime,
+      0.05,
+      0.08,
+      700,
+      500,
+      "triangle",
+    );
+  }
+
+  throwSound(): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const at = ctx.currentTime;
+    this.noiseBurst(ctx, this.master!, at, 0.18, 0.2, "bandpass", 900, 1.5);
+    this.tone(ctx, this.master!, at, 0.05, 0.1, 1200, 900, "square");
+  }
+
   dispose(): void {
     void this.ctx?.close();
     this.ctx = null;

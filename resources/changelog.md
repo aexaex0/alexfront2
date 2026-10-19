@@ -6,6 +6,8 @@
 - Minden nemzetnek egy elfoglalható pontja van; állj a körbe, hogy elfoglald, és tartsd meg a sajátjaidat
 - Gépi katonák minden nemzetnek, 3 nehézségi szint, választható térkép, nemzet és nemzetszám
 - Irányítás: WASD, Shift sprint, Space ugrás, C guggolás, bal klikk lövés, jobb klikk célzás, R újratöltés, Tab eredménytábla
+- **Online mód**: írjatok be ugyanazt a szobanevet, és együtt (vagy egymás ellen) játszhattok; az első belépő választja a térképet
+- Gránát (G), 15 perces meccsek, újraéledési pont választása (számbillentyűk), dupla/tripla kill
 - Közvetlen link: a cím végére írd, hogy #fps
 
 👀 **2026. október 16. (5. rész)**

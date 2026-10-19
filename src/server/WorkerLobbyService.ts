@@ -10,6 +10,7 @@ import {
 import { encodeLobbyMessage } from "@openfront/shared/ZbinWire";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
+import { FPS_MAX_MESSAGE, FpsRooms } from "./FpsRooms";
 import { GameManager } from "./GameManager";
 import {
   InternalGameInfo,
@@ -38,6 +39,9 @@ function publicLobbyGameConfig(gc: GameConfig): GameConfig {
 
 export class WorkerLobbyService {
   private readonly lobbiesWss: WebSocketServer;
+  /** AlexFront 2: the online FPS mode's relay (see FpsRooms). */
+  private readonly fpsWss: WebSocketServer;
+  private readonly fpsRooms = new FpsRooms();
   // Keyed by socket, valued by the platform the client named in the
   // upgrade URL's ?platform= (see LobbySocket.ts), for the per-platform gauge.
   private readonly lobbyClients: Map<WebSocket, ClientPlatform | "unknown"> =
@@ -67,6 +71,10 @@ export class WorkerLobbyService {
     this.lobbiesWss = new WebSocketServer({
       noServer: true,
       maxPayload: 256 * 1024,
+    });
+    this.fpsWss = new WebSocketServer({
+      noServer: true,
+      maxPayload: FPS_MAX_MESSAGE,
     });
     this.setupUpgradeHandler();
     this.setupLobbiesWebSocket();
@@ -306,11 +314,34 @@ export class WorkerLobbyService {
         this.lobbiesWss.handleUpgrade(request, socket, head, (ws) => {
           this.lobbiesWss.emit("connection", ws, request);
         });
+      } else if (pathname === "/fps" || pathname.endsWith("/fps")) {
+        this.fpsWss.handleUpgrade(request, socket, head, (ws) => {
+          this.connectFps(ws);
+        });
       } else {
         this.gameWss.handleUpgrade(request, socket, head, (ws) => {
           this.gameWss.emit("connection", ws, request);
         });
       }
+    });
+  }
+
+  /** One online-FPS player: everything it says goes through the relay. */
+  private connectFps(ws: WebSocket) {
+    const conn = {
+      send: (data: string) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(data);
+      },
+      close: () => ws.close(),
+    };
+    ws.on("message", (data, isBinary) => {
+      if (isBinary) return;
+      this.fpsRooms.message(conn, data.toString());
+    });
+    ws.on("close", () => this.fpsRooms.leave(conn));
+    ws.on("error", () => {
+      this.fpsRooms.leave(conn);
+      ws.terminate();
     });
   }
 

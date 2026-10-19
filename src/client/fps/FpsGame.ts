@@ -30,6 +30,7 @@ import {
   TerrainSource,
   WATER_LEVEL,
 } from "./FpsTerrain";
+import { FpsNet, NetMsg } from "./FpsNet";
 import { FpsWorld, segmentBox } from "./FpsWorld";
 
 export type Difficulty = "easy" | "normal" | "hard";
@@ -54,6 +55,8 @@ export interface FpsOptions {
   seed: number;
   /** Length of the battlefield's longer side, in meters. */
   worldSize?: number;
+  /** Online: the room connection (the host runs the bots and points). */
+  net?: FpsNet | null;
 }
 
 export interface FpsDeps {
@@ -89,6 +92,19 @@ interface Soldier {
   onGround: boolean;
   swimming: boolean;
   crouching: boolean;
+  /** Online: the peer id of a remote human (0 for us and for bots). */
+  peer: number;
+  /** Online: a bot mirrored from the host, not simulated here. */
+  ghost: boolean;
+  /** Shots fired (counted, so others can draw them). */
+  shots: number;
+  seenShots: number;
+  /** Online: where a remote soldier was last reported. */
+  tx: number;
+  ty: number;
+  tz: number;
+  tyaw: number;
+  tpitch: number;
   grenades: number;
   grenadeCd: number;
   shieldUntil: number;
@@ -296,6 +312,12 @@ export class FpsGame {
   private damageFlash = 0;
   private killedBy = "";
   private sensitivity = BASE_SENSITIVITY;
+  // Online
+  private net: FpsNet | null;
+  private netT = 0;
+  private snapT = 0;
+  private snapN = 0;
+  private played = false;
 
   // Frame scratch
   private view = mat4();
@@ -335,6 +357,7 @@ export class FpsGame {
   ) {
     this.rng = new Rng(opts.seed);
     this.diff = DIFFICULTY[opts.difficulty];
+    this.net = opts.net ?? null;
     this.terrain = new FpsTerrain(
       opts.terrain,
       opts.fullWidth,
@@ -346,9 +369,15 @@ export class FpsGame {
 
     // Teams and their points.
     opts.nations.forEach((n, i) => {
-      // The player's nation is always blue; the rest take the palette in turn.
-      const slot =
-        i === opts.playerNation ? 0 : i < opts.playerNation ? i + 1 : i;
+      // Alone, your nation is always blue; online every player sees the
+      // same colours, in the battle's order.
+      const slot = this.net
+        ? i
+        : i === opts.playerNation
+          ? 0
+          : i < opts.playerNation
+            ? i + 1
+            : i;
       const c =
         slot < PALETTE.length
           ? PALETTE[slot]
@@ -406,17 +435,36 @@ export class FpsGame {
       },
     });
 
-    // Soldiers: the player, then each team's squad.
+    // Soldiers: the player, then each team's squad (online, only the host
+    // runs bots; the others mirror them).
     this.player = this.makeSoldier(opts.playerNation, opts.playerName, true);
     this.soldiers.push(this.player);
-    this.teams.forEach((team, ti) => {
-      const squad = this.squadSize(ti);
-      for (let k = 0; k < squad; k++) {
-        const s = this.makeSoldier(ti, `${team.name} ${k + 1}`, false);
-        this.soldiers.push(s);
-      }
-    });
+    if (!this.net || this.net.isHost) {
+      this.teams.forEach((team, ti) => {
+        const squad = this.squadSize(ti);
+        for (let k = 0; k < squad; k++) {
+          const s = this.makeSoldier(ti, `${team.name} ${k + 1}`, false);
+          this.soldiers.push(s);
+        }
+      });
+    }
     for (const s of this.soldiers) this.spawn(s, true);
+    if (this.net) {
+      // Nobody can hurt you before you start playing.
+      this.player.shieldUntil = Infinity;
+      const net = this.net;
+      net.events.onMessage = (from, msg) => this.onNet(from, msg);
+      net.events.onLeave = (id) => this.removePeer(id);
+      net.events.onHost = (id) => {
+        if (id === net.id) this.becomeHost();
+      };
+      net.events.onClose = () => {
+        this.hud.flash(deps.t("fps.connection_lost"));
+        for (const s of this.soldiers) if (s.peer) this.removePeer(s.peer);
+        this.becomeHost();
+        this.net = null;
+      };
+    }
     this.hud.showIntro(opts.mapName, this.teams[opts.playerNation]);
     this.bindInput();
   }
@@ -470,7 +518,13 @@ export class FpsGame {
   private squadSize(team: number): number {
     const owned = this.points.filter((p) => p.owner === team).length;
     const base = 2 + this.teams[team].strength;
-    const isPlayers = team === this.opts.playerNation ? -1 : 0;
+    const humans = this.soldiers.filter(
+      (s) => (s.isPlayer || s.peer) && s.team === team,
+    ).length;
+    const isPlayers = -Math.min(
+      2,
+      humans || (team === this.opts.playerNation ? 1 : 0),
+    );
     return clamp(base + Math.max(0, owned - 1) + isPlayers, 0, 8);
   }
 
@@ -491,6 +545,15 @@ export class FpsGame {
       onGround: true,
       swimming: false,
       crouching: false,
+      peer: 0,
+      ghost: false,
+      shots: 0,
+      seenShots: 0,
+      tx: 0,
+      ty: 0,
+      tz: 0,
+      tyaw: 0,
+      tpitch: 0,
       grenades: 0,
       grenadeCd: 0,
       shieldUntil: 0,
@@ -665,6 +728,7 @@ export class FpsGame {
       if (this.state !== "ended") {
         this.state = "playing";
         this.hud.hideOverlay();
+        this.firstPlay();
       }
     } else if (this.state === "playing" && !this.noLock) {
       this.pause();
@@ -734,6 +798,18 @@ export class FpsGame {
     this.noLock = true;
     this.state = "playing";
     this.hud.hideOverlay();
+    this.firstPlay();
+  }
+
+  /** Online, the spawn protection holds until you actually start. */
+  private firstPlay(): void {
+    if (this.played) return;
+    this.played = true;
+    // A joiner's home point may have fallen since: start at one we hold.
+    if (this.net && !this.authority) this.spawn(this.player, false);
+    if (this.player.shieldUntil === Infinity) {
+      this.player.shieldUntil = this.time + SPAWN_SHIELD;
+    }
   }
 
   setSensitivity(v: number): void {
@@ -749,7 +825,11 @@ export class FpsGame {
       const dt = Math.min(0.1, (now - this.lastFrame) / 1000);
       this.lastFrame = now;
       this.adaptResolution(dt);
-      if (this.state === "playing") {
+      // Online the battle goes on while you're in a menu.
+      if (
+        this.state === "playing" ||
+        (this.net !== null && this.state !== "ended")
+      ) {
         this.acc += dt;
         let steps = 0;
         while (this.acc >= 1 / 60 && steps < 6) {
@@ -787,25 +867,37 @@ export class FpsGame {
     for (let i = 0; i < n; i++) this.update(1 / 60);
   }
 
+  /** Alone, or the online room's host: runs the bots and the points. */
+  private get authority(): boolean {
+    return this.net === null || this.net.isHost;
+  }
+
   private update(dt: number): void {
     this.time += dt;
     this.updatePlayer(dt);
     for (const s of this.soldiers) {
       if (s.isPlayer) continue;
+      if (s.peer || s.ghost) {
+        this.follow(s, dt);
+        continue;
+      }
       if (s.alive) this.updateBot(s, dt);
       else if (this.time >= s.respawnAt && s.respawnAt > 0) {
         if (!this.spawn(s, false)) s.respawnAt = this.time + 3;
       }
     }
     this.separate();
-    this.updatePoints(dt);
-    this.teamTimer -= dt;
-    if (this.teamTimer <= 0) {
-      this.teamTimer = 1;
-      this.refreshTeams();
+    if (this.authority) {
+      this.updatePoints(dt);
+      this.teamTimer -= dt;
+      if (this.teamTimer <= 0) {
+        this.teamTimer = 1;
+        this.refreshTeams();
+      }
     }
     this.updateGrenades(dt);
     this.updateEffects(dt);
+    if (this.net) this.netTick(dt);
     this.checkEnd();
   }
 
@@ -926,6 +1018,7 @@ export class FpsGame {
     const p = this.player;
     p.fireCd = FIRE_INTERVAL;
     p.ammo--;
+    p.shots++;
     const moving = Math.hypot(p.vx, p.vz) / 5.2;
     const spread =
       (this.aiming ? 0.0025 : 0.011) +
@@ -1337,6 +1430,7 @@ export class FpsGame {
   private botFire(s: Soldier, target: Soldier): void {
     s.fireCd = FIRE_INTERVAL * 1.35;
     s.ammo--;
+    s.shots++;
     const d = Math.hypot(target.x - s.x, target.z - s.z);
     const moving = Math.hypot(target.vx, target.vz) > 3 ? 0.012 : 0;
     const spread = this.diff.spread + moving + (d > 80 ? 0.01 : 0);
@@ -1488,8 +1582,30 @@ export class FpsGame {
     grenade = false,
   ): void {
     if (this.time < victim.shieldUntil) return;
+    // Online, a soldier simulated elsewhere takes the hit there: a remote
+    // player on their own machine, a bot on the host's.
+    if (this.net && (victim.peer || victim.ghost)) {
+      if (!victim.alive) return;
+      this.net.send({
+        t: "e",
+        k: "hit",
+        to: victim.peer || this.net.hostId,
+        v: this.refOf(victim),
+        a: this.refOf(attacker),
+        d: Math.round(amount * 10) / 10,
+        h: head ? 1 : 0,
+        g: grenade ? 1 : 0,
+      });
+      if (attacker.isPlayer) {
+        this.hitMarker = 1;
+        this.audio.hit(head);
+      }
+      return;
+    }
     let dmg = amount;
-    if (victim.isPlayer && !attacker.isPlayer) dmg *= this.diff.dmg;
+    // Bots go easier on you by difficulty; players don't.
+    const fromBot = !attacker.isPlayer && !attacker.peer;
+    if (victim.isPlayer && fromBot) dmg *= this.diff.dmg;
     victim.hp -= dmg;
     victim.lastHurt = this.time;
     if (attacker.isPlayer) {
@@ -1530,10 +1646,19 @@ export class FpsGame {
     this.teams[killer.team].kills++;
     victim.respawnAt =
       this.time + (victim.isPlayer ? PLAYER_RESPAWN : BOT_RESPAWN);
+    // Online: tell the room (we only ever kill soldiers we simulate).
+    this.net?.send({
+      t: "e",
+      k: "kill",
+      a: this.refOf(killer),
+      v: this.refOf(victim),
+      h: head ? 1 : 0,
+      g: grenade ? 1 : 0,
+    });
     this.feed.push({
-      killer: killer.isPlayer ? this.opts.playerName : killer.name,
+      killer: this.nameOf(killer),
       kc: this.teams[killer.team].css,
-      victim: victim.isPlayer ? this.opts.playerName : victim.name,
+      victim: this.nameOf(victim),
       vc: this.teams[victim.team].css,
       head,
       grenade,
@@ -1558,23 +1683,7 @@ export class FpsGame {
         9,
       );
     }
-    if (killer.isPlayer) {
-      this.audio.kill();
-      this.hud.flash(
-        this.deps.t(head ? "fps.headshot_kill" : "fps.kill", {
-          name: victim.name,
-        }),
-      );
-      // Several kills in quick succession get a callout.
-      this.streak = this.streak.filter((t) => this.time - t < 4);
-      this.streak.push(this.time);
-      if (this.streak.length === 2)
-        this.hud.flash(this.deps.t("fps.double_kill"));
-      if (this.streak.length === 3)
-        this.hud.flash(this.deps.t("fps.triple_kill"));
-      if (this.streak.length >= 4)
-        this.hud.flash(this.deps.t("fps.multi_kill"));
-    }
+    if (killer.isPlayer) this.creditKill(this.nameOf(victim), head);
     if (victim.isPlayer) {
       this.killedBy = killer.name;
       this.killer = killer;
@@ -1616,7 +1725,7 @@ export class FpsGame {
 
   private launchGrenade(s: Soldier, vx: number, vy: number, vz: number): void {
     const [fx, , fz] = forward(s.yaw, 0);
-    this.grenadeList.push({
+    const g: Grenade = {
       x: s.x + fx * 0.5,
       y: this.eyeY(s) - 0.1,
       z: s.z + fz * 0.5,
@@ -1626,6 +1735,14 @@ export class FpsGame {
       fuse: GRENADE_FUSE,
       spin: 0,
       owner: s,
+    };
+    this.grenadeList.push(g);
+    this.net?.send({
+      t: "e",
+      k: "nade",
+      o: this.refOf(s),
+      p: [g.x, g.y, g.z].map(round2),
+      v: [vx, vy, vz].map(round2),
     });
   }
 
@@ -1729,9 +1846,11 @@ export class FpsGame {
         16,
       );
     }
-    // Damage everyone around (but not teammates), unless sheltered.
+    // Damage everyone around (but not teammates), unless sheltered. Online,
+    // each machine hurts only what it simulates: you, and the host its bots.
     for (const s of this.soldiers) {
       if (!s.alive) continue;
+      if (this.net && (s.peer || s.ghost)) continue;
       if (s.team === g.owner.team && s !== g.owner) continue;
       const cy = this.chestY(s);
       const d = Math.hypot(s.x - g.x, cy - g.y, s.z - g.z);
@@ -1751,6 +1870,22 @@ export class FpsGame {
       this.audio.boom(clamp(1 - pd / 260, 0, 1), clamp(-Math.sin(ang), -1, 1));
     }
     this.shake = Math.max(this.shake, clamp(1 - pd / 30, 0, 1));
+  }
+
+  /** You got a kill: sound, callout and streaks. */
+  private creditKill(victim: string, head: boolean): void {
+    this.audio.kill();
+    this.hud.flash(
+      this.deps.t(head ? "fps.headshot_kill" : "fps.kill", { name: victim }),
+    );
+    // Several kills in quick succession get a callout.
+    this.streak = this.streak.filter((t) => this.time - t < 4);
+    this.streak.push(this.time);
+    if (this.streak.length === 2)
+      this.hud.flash(this.deps.t("fps.double_kill"));
+    if (this.streak.length === 3)
+      this.hud.flash(this.deps.t("fps.triple_kill"));
+    if (this.streak.length >= 4) this.hud.flash(this.deps.t("fps.multi_kill"));
   }
 
   private impact(hit: Hit, x: number, y: number, z: number): void {
@@ -2436,7 +2571,7 @@ export class FpsGame {
     const mine = this.teams[p.team].color;
     for (const s of this.soldiers) {
       if (!s.alive || s.isPlayer || s.team !== p.team) continue;
-      if (Math.hypot(s.x - p.x, s.z - p.z) > 140) continue;
+      if (Math.hypot(s.x - p.x, s.z - p.z) > (s.peer ? 400 : 140)) continue;
       this.sprite(
         s.x,
         s.y + 2.25,
@@ -2609,6 +2744,18 @@ export class FpsGame {
       playerKills: p.kills,
       playerDeaths: p.deaths,
       timeLeft: Math.max(0, MATCH_TIME - this.time),
+      online: this.net
+        ? { room: this.net.room, players: this.net.peers.size + 1 }
+        : null,
+      humans: this.soldiers
+        .filter((s) => s.isPlayer || s.peer)
+        .map((s) => ({
+          name: this.nameOf(s),
+          css: this.teams[s.team].css,
+          kills: s.kills,
+          deaths: s.deaths,
+          me: s.isPlayer,
+        })),
     };
   }
 
@@ -2624,12 +2771,413 @@ export class FpsGame {
     return this.trace(this.player, ox, oy, oz, dx, dy, dz, true).soldier;
   }
 
+  // ----------------------------------------------------------------- online
+
+  /** How a soldier is named on the wire: bots by id, players by -peer. */
+  private refOf(s: Soldier): number {
+    if (s.isPlayer) return -(this.net?.id ?? 0);
+    if (s.peer) return -s.peer;
+    return s.id;
+  }
+
+  private byRef(ref: number): Soldier | null {
+    if (!Number.isFinite(ref) || ref === 0) return null;
+    if (ref < 0) {
+      if (this.net && -ref === this.net.id) return this.player;
+      return this.soldiers.find((s) => s.peer === -ref) ?? null;
+    }
+    return (
+      this.soldiers.find((s) => s.id === ref && !s.isPlayer && !s.peer) ?? null
+    );
+  }
+
+  private nameOf(s: Soldier): string {
+    return s.isPlayer ? this.opts.playerName : s.name;
+  }
+
+  private netTick(dt: number): void {
+    const net = this.net;
+    if (!net || !net.open) return;
+    this.netT -= dt;
+    if (this.netT <= 0) {
+      this.netT = 0.05;
+      const p = this.player;
+      net.send({
+        t: "s",
+        n: this.opts.playerName,
+        tm: p.team,
+        x: round2(p.x),
+        y: round2(p.y),
+        z: round2(p.z),
+        yw: round3(p.yaw),
+        pt: round3(p.pitch),
+        a: p.alive ? 1 : 0,
+        hp: Math.round(p.hp),
+        c: p.crouching ? 1 : 0,
+        sh: p.shots,
+        k: p.kills,
+        d: p.deaths,
+      });
+    }
+    if (!net.isHost) return;
+    this.snapT -= dt;
+    if (this.snapT > 0) return;
+    this.snapT = 1 / 12;
+    // Bot names go out every two seconds, for players who just joined.
+    const named = this.snapN++ % 24 === 0;
+    const bots: (number | string)[][] = [];
+    for (const b of this.soldiers) {
+      if (b.isPlayer || b.peer) continue;
+      const e: (number | string)[] = [
+        b.id,
+        b.team,
+        round2(b.x),
+        round2(b.y),
+        round2(b.z),
+        round3(b.yaw),
+        round3(b.pitch),
+        b.alive ? 1 : 0,
+        Math.round(b.hp),
+        b.shots,
+      ];
+      if (named) e.push(b.name);
+      bots.push(e);
+    }
+    net.send({
+      t: "w",
+      tm: round2(this.time),
+      p: this.points.map((pt) => [
+        pt.owner,
+        pt.capturer,
+        Math.round(pt.control * 1000),
+        pt.contested ? 1 : 0,
+      ]),
+      tk: this.teams.map((tm) => tm.kills),
+      el: this.teams.map((tm) => (tm.eliminated ? 1 : 0)),
+      b: bots,
+    });
+  }
+
+  private onNet(from: number, m: NetMsg): void {
+    if (m.t === "s") this.applyState(from, m);
+    else if (m.t === "w") this.applySnapshot(m);
+    else if (m.t === "e") this.applyEvent(m);
+  }
+
+  /** Another player's soldier, as they report it. */
+  private applyState(from: number, m: NetMsg): void {
+    const team = num(m.tm, -1);
+    if (!(team >= 0 && team < this.teams.length)) return;
+    const name = String(m.n ?? "").slice(0, 24) || "Player";
+    let s = this.soldiers.find((x) => x.peer === from);
+    const x = num(m.x, 0);
+    const y = num(m.y, 0);
+    const z = num(m.z, 0);
+    if (!s) {
+      s = this.makeSoldier(team, name, false);
+      s.peer = from;
+      s.x = s.tx = x;
+      s.y = s.ty = y;
+      s.z = s.tz = z;
+      s.seenShots = num(m.sh, 0);
+      this.soldiers.push(s);
+    }
+    s.team = team;
+    s.name = name;
+    s.tx = x;
+    s.ty = y;
+    s.tz = z;
+    s.tyaw = num(m.yw, s.tyaw);
+    s.tpitch = num(m.pt, s.tpitch);
+    const alive = m.a === 1;
+    if (s.alive && !alive) {
+      s.alive = false;
+      s.diedAt = this.time;
+    } else if (!s.alive && alive) {
+      s.alive = true;
+      s.x = x;
+      s.y = y;
+      s.z = z;
+    }
+    s.hp = num(m.hp, 100);
+    s.crouching = m.c === 1;
+    s.shots = num(m.sh, s.shots);
+    s.kills = num(m.k, 0);
+    s.deaths = num(m.d, 0);
+  }
+
+  /** The host's view of the battle: points, nations and bots. */
+  private applySnapshot(m: NetMsg): void {
+    if (this.authority) return;
+    const time = num(m.tm, NaN);
+    if (Number.isFinite(time)) this.time = time;
+    const me = this.player.team;
+    if (Array.isArray(m.p)) {
+      (m.p as number[][]).forEach((e, i) => {
+        const pt = this.points[i];
+        if (!pt || !Array.isArray(e)) return;
+        const owner = num(e[0], pt.owner);
+        if (owner !== pt.owner) {
+          if (owner === me) {
+            this.hud.flash(
+              this.deps.t("fps.point_captured", { name: pt.name }),
+            );
+            this.audio.capture();
+          } else if (pt.owner === me) {
+            this.hud.flash(this.deps.t("fps.point_lost", { name: pt.name }));
+          }
+        }
+        pt.owner = owner;
+        pt.capturer = num(e[1], pt.capturer);
+        pt.control = clamp(num(e[2], 1000) / 1000, 0, 1);
+        pt.contested = e[3] === 1;
+      });
+    }
+    if (Array.isArray(m.tk)) {
+      (m.tk as number[]).forEach((k, i) => {
+        if (this.teams[i]) this.teams[i].kills = num(k, 0);
+      });
+    }
+    if (Array.isArray(m.el)) {
+      (m.el as number[]).forEach((e, i) => {
+        const team = this.teams[i];
+        if (!team) return;
+        if (e === 1 && !team.eliminated) {
+          this.hud.flash(this.deps.t("fps.nation_fallen", { name: team.name }));
+        }
+        team.eliminated = e === 1;
+      });
+    }
+    if (!Array.isArray(m.b)) return;
+    const seen = new Set<number>();
+    for (const e of m.b as (number | string)[][]) {
+      if (!Array.isArray(e) || e.length < 10) continue;
+      const id = num(e[0], 0);
+      const team = num(e[1], -1);
+      if (id <= 0 || !(team >= 0 && team < this.teams.length)) continue;
+      seen.add(id);
+      let b = this.byRef(id);
+      const x = num(e[2], 0);
+      const y = num(e[3], 0);
+      const z = num(e[4], 0);
+      const alive = e[7] === 1;
+      if (!b) {
+        b = this.makeSoldier(team, `${this.teams[team].name}`, false);
+        b.id = id;
+        b.ghost = true;
+        b.x = b.tx = x;
+        b.y = b.ty = y;
+        b.z = b.tz = z;
+        b.alive = alive;
+        b.seenShots = num(e[9], 0);
+        this.soldiers.push(b);
+      }
+      b.team = team;
+      b.tx = x;
+      b.ty = y;
+      b.tz = z;
+      b.tyaw = num(e[5], b.tyaw);
+      b.tpitch = num(e[6], b.tpitch);
+      if (b.alive && !alive) {
+        b.alive = false;
+        b.diedAt = this.time;
+      } else if (!b.alive && alive) {
+        b.alive = true;
+        b.x = x;
+        b.y = y;
+        b.z = z;
+      }
+      b.hp = num(e[8], 100);
+      b.shots = num(e[9], b.shots);
+      if (typeof e[10] === "string") b.name = e[10].slice(0, 40);
+    }
+    // Bots the host no longer has.
+    for (let i = this.soldiers.length - 1; i >= 0; i--) {
+      const b = this.soldiers[i];
+      if (b.ghost && !seen.has(b.id)) this.soldiers.splice(i, 1);
+    }
+  }
+
+  private applyEvent(m: NetMsg): void {
+    switch (m.k) {
+      case "hit": {
+        const victim = this.byRef(num(m.v, 0));
+        const attacker = this.byRef(num(m.a, 0));
+        if (!victim || !attacker) return;
+        const ours =
+          victim === this.player ||
+          (this.authority && !victim.isPlayer && !victim.peer && !victim.ghost);
+        if (!ours) return;
+        const amount = clamp(num(m.d, 0), 0, 200);
+        this.damage(victim, attacker, m.h === 1, amount, m.g === 1);
+        return;
+      }
+      case "kill": {
+        const killer = this.byRef(num(m.a, 0));
+        const victim = this.byRef(num(m.v, 0));
+        if (!killer || !victim) return;
+        const head = m.h === 1;
+        if ((victim.peer || victim.ghost) && victim.alive) {
+          victim.alive = false;
+          victim.diedAt = this.time;
+        }
+        // The host keeps the nations' kill counts for the room.
+        if (this.authority) this.teams[killer.team].kills++;
+        this.feed.push({
+          killer: this.nameOf(killer),
+          kc: this.teams[killer.team].css,
+          victim: this.nameOf(victim),
+          vc: this.teams[victim.team].css,
+          head,
+          grenade: m.g === 1,
+          at: this.time,
+        });
+        if (this.feed.length > 6) this.feed.shift();
+        if (killer === this.player) {
+          this.player.kills++;
+          this.creditKill(this.nameOf(victim), head);
+        }
+        return;
+      }
+      case "nade": {
+        const owner = this.byRef(num(m.o, 0));
+        const pos = vec3(m.p);
+        const vel = vec3(m.v);
+        if (!owner || !pos || !vel) return;
+        this.grenadeList.push({
+          x: pos[0],
+          y: pos[1],
+          z: pos[2],
+          vx: vel[0],
+          vy: vel[1],
+          vz: vel[2],
+          fuse: GRENADE_FUSE,
+          spin: 0,
+          owner,
+        });
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /** Moves a soldier simulated elsewhere toward where it was reported. */
+  private follow(s: Soldier, dt: number): void {
+    const px = s.x;
+    const pz = s.z;
+    if (Math.hypot(s.tx - s.x, s.tz - s.z) > 8) {
+      s.x = s.tx;
+      s.y = s.ty;
+      s.z = s.tz;
+    } else {
+      const k = Math.min(1, dt * 12);
+      s.x += (s.tx - s.x) * k;
+      s.y += (s.ty - s.y) * k;
+      s.z += (s.tz - s.z) * k;
+    }
+    const k = Math.min(1, dt * 14);
+    s.yaw += angleDiff(s.yaw, s.tyaw) * k;
+    s.pitch += (s.tpitch - s.pitch) * k;
+    s.vx = (s.x - px) / dt;
+    s.vz = (s.z - pz) / dt;
+    const speed = Math.hypot(s.vx, s.vz);
+    if (speed > 0.5) s.walk += dt * speed * 1.6;
+    if (s.shots > s.seenShots) {
+      const n = Math.min(3, s.shots - s.seenShots);
+      s.seenShots = s.shots;
+      if (s.alive) for (let i = 0; i < n; i++) this.remoteShot(s);
+    }
+  }
+
+  /** Draws (and sounds) a shot fired by a soldier simulated elsewhere. */
+  private remoteShot(s: Soldier): void {
+    const eye = this.eyeY(s);
+    const [dx, dy, dz] = this.spreadDir(s.yaw, s.pitch, 0.02);
+    const hit = this.trace(s, s.x, eye, s.z, dx, dy, dz);
+    const [fx, fy, fz] = forward(s.yaw, s.pitch);
+    const mx = s.x + fx * 0.85 + Math.cos(s.yaw) * 0.18;
+    const my = eye - 0.25 + fy * 0.85;
+    const mz = s.z + fz * 0.85 - Math.sin(s.yaw) * 0.18;
+    const hx = s.x + dx * hit.t;
+    const hy = eye + dy * hit.t;
+    const hz = s.z + dz * hit.t;
+    this.addTracer(mx, my, mz, hx, hy, hz, 1, 0.75, 0.4);
+    this.addParticle(
+      mx,
+      my,
+      mz,
+      0,
+      0,
+      0,
+      0.05,
+      -0.32,
+      1,
+      0.8,
+      0.4,
+      0.9,
+      true,
+      0,
+    );
+    if (hit.kind !== "soldier") this.impact(hit, hx, hy, hz);
+    const p = this.player;
+    const pd = Math.hypot(s.x - p.x, s.z - p.z);
+    if (pd < 220) {
+      const ang = angleDiff(p.yaw, Math.atan2(-(s.x - p.x), -(s.z - p.z)));
+      this.audio.shot(
+        clamp(1 - pd / 220, 0, 1) * 0.55,
+        clamp(-Math.sin(ang), -1, 1),
+        true,
+      );
+    }
+  }
+
+  private removePeer(id: number): void {
+    const i = this.soldiers.findIndex((s) => s.peer === id);
+    if (i < 0) return;
+    const gone = this.soldiers[i];
+    this.soldiers.splice(i, 1);
+    for (const s of this.soldiers) if (s.enemy === gone) s.enemy = null;
+    if (this.killer === gone) this.killer = null;
+  }
+
+  /** The host left (or the connection dropped): we run the bots now. */
+  private becomeHost(): void {
+    let maxId = 0;
+    for (const s of this.soldiers) {
+      maxId = Math.max(maxId, s.id);
+      if (!s.ghost) continue;
+      s.ghost = false;
+      s.x = s.tx;
+      s.y = s.ty;
+      s.z = s.tz;
+      s.yaw = s.tyaw;
+      s.pitch = s.tpitch;
+      s.vx = s.vy = s.vz = 0;
+      s.onGround = true;
+      s.goal = -1;
+      s.enemy = null;
+      s.thinkT = 0;
+      s.ammo = MAG;
+      s.reloadT = 0;
+      s.fireCd = -10;
+      s.grenades = 1;
+      s.grenadeCd = 3;
+      if (!s.alive) s.respawnAt = this.time + BOT_RESPAWN;
+    }
+    this.nextId = Math.max(this.nextId, maxId + 1);
+    this.snapN = 0;
+    this.snapT = 0;
+  }
+
   quit(): void {
     this.dispose();
     this.deps.onExit();
   }
 
   dispose(): void {
+    this.net?.close();
+    this.net = null;
     cancelAnimationFrame(this.raf);
     this.unbindInput();
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
@@ -2682,6 +3230,25 @@ export class FpsGame {
       kills: this.teams.map((t) => t.kills),
     };
   }
+}
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
+function round3(v: number): number {
+  return Math.round(v * 1000) / 1000;
+}
+
+/** A finite number from the wire, or the fallback. */
+function num(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+function vec3(v: unknown): [number, number, number] | null {
+  if (!Array.isArray(v) || v.length !== 3) return null;
+  const out = v.map((x) => num(x, NaN));
+  return out.every(Number.isFinite) ? [out[0], out[1], out[2]] : null;
 }
 
 /** Ray (unit d) vs sphere: distance to the first hit, or -1. */

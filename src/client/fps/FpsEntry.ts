@@ -3,6 +3,7 @@
 // The main menu loads this module with import() when the FPS card is clicked.
 
 import { maps } from "@openfront/engine-api/game/GameTypes";
+import { ClientEnv } from "../ClientEnv";
 import { terrainMapFileLoader } from "../TerrainMapFileLoader";
 import { translateText } from "../Utils";
 import { FpsLauncher, FpsLoadedMap } from "./FpsLauncher";
@@ -40,6 +41,15 @@ async function loadMap(key: string): Promise<FpsLoadedMap> {
   };
 }
 
+/** The online relay lives on the first game worker (all rooms in one place). */
+function relayUrl(): string | null {
+  try {
+    return `${ClientEnv.serverWsBase()}/w0/fps`;
+  } catch {
+    return null;
+  }
+}
+
 /** Translations load in the background; a #fps link can be faster. */
 async function translationsReady(): Promise<void> {
   for (let i = 0; i < 40 && translateText("fps.title") === "fps.title"; i++) {
@@ -64,6 +74,7 @@ export async function launchFps(playerName: string): Promise<void> {
     defaultMap: "Hungary",
     loadMap,
     playerName,
+    netUrl: relayUrl(),
     onExit: () => {
       launcher = null;
       if (location.hash === "#fps") {

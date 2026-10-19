@@ -64,6 +64,16 @@ export interface HudState {
   playerDeaths: number;
   /** Seconds left in the match. */
   timeLeft: number;
+  /** Online: the room and how many players are in it. */
+  online: { room: string; players: number } | null;
+  /** The human players (you, and others online). */
+  humans: {
+    name: string;
+    css: string;
+    kills: number;
+    deaths: number;
+    me: boolean;
+  }[];
 }
 
 export interface HudCallbacks {
@@ -122,6 +132,7 @@ const CSS = `
 .fps-capture .fps-bar b{transition:none}
 .fps-minimap{left:16px;top:16px;width:200px;height:200px;padding:4px}
 .fps-minimap canvas{width:100%;height:100%;border-radius:7px;display:block}
+.fps-online{position:absolute;left:16px;top:224px;font-size:13px;font-weight:700;color:#86efac;display:none}
 .fps-feed{position:absolute;right:16px;top:16px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:14px;font-weight:600}
 .fps-feed div{background:rgba(10,12,16,.55);padding:3px 9px;border-radius:6px}
 .fps-flash{position:absolute;left:50%;top:30%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px}
@@ -136,6 +147,7 @@ const CSS = `
 .fps-dead .spawns span{padding:4px 10px;border:2px solid;border-radius:8px;font-weight:800;font-size:15px;background:rgba(0,0,0,.35)}
 .fps-dead .spawns span.on{background:rgba(255,255,255,.25)}
 .fps-score{left:50%;top:50%;transform:translate(-50%,-50%);padding:18px 22px;min-width:460px;display:none}
+.fps-score h3+table+h3{margin-top:16px}
 .fps-score h3{margin:0 0 10px;font-size:18px;letter-spacing:.1em;text-transform:uppercase}
 .fps-score table{border-collapse:collapse;width:100%;font-size:15px}
 .fps-score th{text-align:left;font-size:12px;opacity:.7;text-transform:uppercase;letter-spacing:.08em;padding:4px 8px}
@@ -202,6 +214,8 @@ export class FpsHud {
   private grenadeEl: HTMLDivElement;
   private pointsBox: HTMLDivElement;
   private timerEl: HTMLDivElement;
+  private onlineEl: HTMLDivElement;
+  private lastOnline = "";
   private lastTimer = "";
   private pointEls: { box: HTMLDivElement; fill: HTMLDivElement }[] = [];
   private capture: HTMLDivElement;
@@ -267,6 +281,7 @@ export class FpsHud {
     const cbar = el("div", "fps-bar", this.capture);
     this.captureBar = el("b", "", cbar);
 
+    this.onlineEl = el("div", "fps-online", root);
     const mm = el("div", "fps-panel fps-minimap", root);
     this.mini = el("canvas", "", mm);
     this.mini.width = 384;
@@ -501,6 +516,17 @@ export class FpsHud {
     }
 
     this.updatePoints(s);
+    const online = s.online
+      ? this.t("fps.online_status", {
+          room: s.online.room,
+          players: s.online.players,
+        })
+      : "";
+    if (online !== this.lastOnline) {
+      this.lastOnline = online;
+      this.onlineEl.textContent = online;
+      this.onlineEl.style.display = online ? "block" : "none";
+    }
     const timer = formatTime(Math.ceil(s.timeLeft));
     if (timer !== this.lastTimer) {
       this.lastTimer = timer;
@@ -672,6 +698,23 @@ export class FpsHud {
       el("td", "", tr).textContent = String(row.points);
       el("td", "", tr).textContent = String(row.alive);
       el("td", "", tr).textContent = String(row.team.kills);
+    }
+    if (s.humans.length > 1) {
+      el("h3", "", this.scoreEl).textContent = this.t("fps.players");
+      const pt = el("table", "", this.scoreEl);
+      const ph = el("tr", "", pt);
+      for (const k of ["fps.player", "fps.kills", "fps.deaths"]) {
+        el("th", "", ph).textContent = this.t(k);
+      }
+      for (const h of [...s.humans].sort((a, b) => b.kills - a.kills)) {
+        const tr = el("tr", h.me ? "me" : "", pt);
+        const name = el("td", "", tr);
+        const sw = el("span", "sw", name);
+        sw.style.background = h.css;
+        name.appendChild(document.createTextNode(h.name));
+        el("td", "", tr).textContent = String(h.kills);
+        el("td", "", tr).textContent = String(h.deaths);
+      }
     }
     el("div", "mine", this.scoreEl).textContent = this.t("fps.your_stats", {
       kills: s.playerKills,

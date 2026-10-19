@@ -9,6 +9,7 @@ import {
   FpsGame,
   FpsNationInput,
 } from "./FpsGame";
+import { FpsNet } from "./FpsNet";
 import { TerrainSource } from "./FpsTerrain";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
@@ -34,6 +35,34 @@ export interface FpsLauncherDeps {
   loadMap: (key: string) => Promise<FpsLoadedMap>;
   playerName: string;
   onExit?: () => void;
+  /** The online relay's WebSocket URL; without one, no online mode. */
+  netUrl?: string | null;
+}
+
+/** What a room's host shares so everyone builds the same battle. */
+export interface FpsRoomConfig {
+  v: 1;
+  map: string;
+  /** The host's nation, as an index into the map's nations. */
+  nation: number;
+  count: number;
+  seed: number;
+  difficulty: Difficulty;
+}
+
+export function parseRoomConfig(raw: unknown): FpsRoomConfig | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const c = raw as Record<string, unknown>;
+  const int = (v: unknown) =>
+    typeof v === "number" && Number.isInteger(v) ? v : NaN;
+  const nation = int(c.nation);
+  const count = int(c.count);
+  const seed = int(c.seed);
+  const d = c.difficulty;
+  if (typeof c.map !== "string" || !(nation >= 0)) return null;
+  if (!(count >= 2 && count <= 10) || !Number.isFinite(seed)) return null;
+  if (d !== "easy" && d !== "normal" && d !== "hard") return null;
+  return { v: 1, map: c.map, nation, count, seed, difficulty: d };
 }
 
 export interface FpsBattle {
@@ -53,6 +82,8 @@ interface Settings {
   count: number;
   difficulty: Difficulty;
   sensitivity: number;
+  online: boolean;
+  room: string;
 }
 
 function loadSettings(): Partial<Settings> {
@@ -244,6 +275,10 @@ const CSS = `
 .fps-setup .start:disabled{filter:grayscale(1) brightness(.6);cursor:default}
 .fps-setup .back{background:rgba(255,255,255,.12);flex:.6 !important}
 .fps-setup .legal{margin-top:14px;text-align:center;font-size:11px;opacity:.4}
+.fps-setup .room input{width:100%;padding:10px 12px;border-radius:10px;background:#0f1420;color:#fff;border:1px solid rgba(255,255,255,.2);font-size:16px;font-weight:800;letter-spacing:.2em}
+.fps-setup .room .hint{margin:6px 0 0;font-size:13px;opacity:.7;line-height:1.4}
+.fps-setup .fps-seg+.room{margin-top:4px}
+.fps-setup .card>.fps-seg:first-of-type{margin-bottom:4px}
 .fps-game{position:absolute;inset:0}
 `;
 
@@ -252,6 +287,8 @@ export class FpsLauncher {
   private style: HTMLStyleElement;
   private setupEl: HTMLDivElement | null = null;
   private game: FpsGame | null = null;
+  /** The online room we're in (or connecting to), outside of a game. */
+  private net: FpsNet | null = null;
   private loaded: FpsLoadedMap | null = null;
   private loadedKey = "";
   private loadToken = 0;
@@ -280,6 +317,9 @@ export class FpsLauncher {
           ? saved.difficulty
           : "normal",
       sensitivity: Math.max(0.3, Math.min(3, saved.sensitivity ?? 1)),
+      online: saved.online === true && !!deps.netUrl,
+      room:
+        typeof saved.room === "string" && saved.room ? saved.room : "PUBLIC",
     };
     this.style = document.createElement("style");
     this.style.textContent = CSS;
@@ -320,6 +360,42 @@ export class FpsLauncher {
     add("p", "desc").textContent = this.t("fps.setup_desc");
     if (this.touchOnly()) {
       add("p", "desc warn").textContent = this.t("fps.desktop_only");
+    }
+
+    let roomBox: HTMLDivElement | null = null;
+    if (this.deps.netUrl) {
+      const modes = add("div", "fps-seg");
+      const solo = add("button", this.settings.online ? "" : "on", modes);
+      solo.type = "button";
+      solo.textContent = this.t("fps.mode_solo");
+      const online = add("button", this.settings.online ? "on" : "", modes);
+      online.type = "button";
+      online.textContent = this.t("fps.mode_online");
+      roomBox = add("div", "room");
+      add("label", "", roomBox).textContent = this.t("fps.room");
+      const room = add("input", "", roomBox);
+      room.type = "text";
+      room.maxLength = 12;
+      room.value = this.settings.room;
+      room.addEventListener("input", () => {
+        room.value = room.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+        this.settings.room = room.value || "PUBLIC";
+      });
+      add("p", "hint", roomBox).textContent = this.t("fps.room_hint");
+      const sync = () => {
+        solo.classList.toggle("on", !this.settings.online);
+        online.classList.toggle("on", this.settings.online);
+        roomBox!.style.display = this.settings.online ? "block" : "none";
+      };
+      solo.addEventListener("click", () => {
+        this.settings.online = false;
+        sync();
+      });
+      online.addEventListener("click", () => {
+        this.settings.online = true;
+        sync();
+      });
+      sync();
     }
 
     add("label").textContent = this.t("fps.map");
@@ -523,7 +599,160 @@ export class FpsLauncher {
     if (!(player >= 0 && player < map.nations.length)) return;
     this.settings.nation = map.nations[player].name;
     saveSettings(this.settings);
-    this.launch(player);
+    if (this.settings.online && this.deps.netUrl) this.goOnline(player);
+    else this.launch(player);
+  }
+
+  /**
+   * Joins the room: the first one in hosts a battle with these settings,
+   * everyone after joins the host's battle and picks a side.
+   */
+  private goOnline(player: number): void {
+    const ui = this.ui;
+    if (!ui || !this.deps.netUrl) return;
+    ui.start.disabled = true;
+    this.setStatus(this.t("fps.connecting"));
+    this.net?.close();
+    const net = new FpsNet(
+      this.deps.netUrl,
+      this.settings.room,
+      this.deps.playerName || "Player",
+    );
+    this.net = net;
+    net.events.onClose = (full) => {
+      if (this.net !== net) return;
+      this.net = null;
+      if (!this.setupEl) this.showSetup();
+      this.setStatus(this.t(full ? "fps.room_full" : "fps.offline"), true);
+      if (this.ui) this.ui.start.disabled = false;
+    };
+    net.events.onWelcome = () => {
+      if (net.isHost) {
+        const cfg: FpsRoomConfig = {
+          v: 1,
+          map: this.loadedKey,
+          nation: player,
+          count: this.settings.count,
+          seed: (Date.now() ^ (Math.random() * 0x7fffffff)) & 0x7fffffff,
+          difficulty: this.settings.difficulty,
+        };
+        net.cfg = cfg;
+        net.send({ t: "cfg", cfg });
+        this.startRoomGame(net, cfg, 0);
+      } else if (net.cfg) {
+        void this.joinRoom(net, net.cfg);
+      } else {
+        this.setStatus(this.t("fps.waiting_host"));
+        net.events.onMessage = (_from, m) => {
+          if (m.t === "cfg" && m.cfg) void this.joinRoom(net, m.cfg);
+        };
+      }
+    };
+  }
+
+  /** A room's battle is on: load its map and let the player pick a side. */
+  private async joinRoom(net: FpsNet, raw: unknown): Promise<void> {
+    net.events.onMessage = undefined;
+    const cfg = parseRoomConfig(raw);
+    if (!cfg || !this.deps.maps.some((m) => m.key === cfg.map)) {
+      net.close();
+      this.net = null;
+      this.setStatus(this.t("fps.load_failed"), true);
+      return;
+    }
+    this.setStatus(this.t("fps.loading"));
+    try {
+      if (!this.loaded || this.loadedKey !== cfg.map) {
+        this.loaded = await this.deps.loadMap(cfg.map);
+        this.loadedKey = cfg.map;
+      }
+    } catch (e) {
+      console.error("FPS map load failed", e);
+      net.close();
+      this.net = null;
+      this.setStatus(this.t("fps.load_failed"), true);
+      return;
+    }
+    if (this.net !== net || cfg.nation >= this.loaded.nations.length) return;
+    this.showJoin(net, cfg);
+  }
+
+  private showJoin(net: FpsNet, cfg: FpsRoomConfig): void {
+    const map = this.loaded;
+    if (!map) return;
+    const battle = prepareBattle(map, cfg.nation, cfg.count);
+    this.setupEl?.remove();
+    this.ui = null;
+    const s = document.createElement("div");
+    s.className = "fps-setup";
+    this.setupEl = s;
+    this.root.appendChild(s);
+    const card = document.createElement("div");
+    card.className = "card";
+    s.appendChild(card);
+    const add = <K extends keyof HTMLElementTagNameMap>(
+      tag: K,
+      cls = "",
+      parent: HTMLElement = card,
+    ) => {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      parent.appendChild(e);
+      return e;
+    };
+    const h1 = add("h1");
+    h1.append("AlexFront ");
+    add("span", "", h1).textContent = "FPS";
+    add("h2").textContent = this.t("fps.mode_online");
+    const mapName =
+      this.deps.maps.find((m) => m.key === cfg.map)?.name ?? cfg.map;
+    const host = net.peers.get(net.hostId) ?? "?";
+    add("p", "desc").textContent = this.t("fps.room_info", {
+      room: net.room,
+      map: mapName,
+      host,
+      players: net.peers.size + 1,
+    });
+    add("label").textContent = this.t("fps.your_side");
+    const side = add("select");
+    battle.nations.forEach((n, i) => {
+      const o = add("option", "", side);
+      o.value = String(i);
+      o.textContent = n.name;
+    });
+    // Same side as the host by default: play together against the bots.
+    side.value = "0";
+    const status = add("div", "status");
+    const btns = add("div", "btns");
+    const leave = add("button", "back", btns);
+    leave.type = "button";
+    leave.textContent = this.t("fps.leave");
+    const join = add("button", "start", btns);
+    join.type = "button";
+    join.textContent = this.t("fps.join_battle");
+    leave.addEventListener("click", () => {
+      net.close();
+      this.net = null;
+      this.showSetup();
+    });
+    join.addEventListener("click", () => {
+      status.textContent = "";
+      this.startRoomGame(net, cfg, Number(side.value));
+    });
+  }
+
+  /** Starts (host) or joins (everyone else) the room's battle on `side`. */
+  private startRoomGame(net: FpsNet, cfg: FpsRoomConfig, side: number): void {
+    const map = this.loaded;
+    if (!map) return;
+    const battle = prepareBattle(map, cfg.nation, cfg.count);
+    if (!(side >= 0 && side < battle.nations.length)) side = 0;
+    // From here on the game owns the connection.
+    this.net = null;
+    net.events.onWelcome = undefined;
+    this.startBattle(battle, side, cfg.seed, cfg.difficulty, net, () => {
+      this.showSetup();
+    });
   }
 
   /** Starts a battle for `player` (an index into the loaded map's nations). */
@@ -531,6 +760,24 @@ export class FpsLauncher {
     const map = this.loaded;
     if (!map) return;
     const battle = prepareBattle(map, player, this.settings.count);
+    this.startBattle(
+      battle,
+      battle.playerNation,
+      (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0,
+      this.settings.difficulty,
+      null,
+      () => this.launch(player),
+    );
+  }
+
+  private startBattle(
+    battle: FpsBattle,
+    side: number,
+    seed: number,
+    difficulty: Difficulty,
+    net: FpsNet | null,
+    restart: () => void,
+  ): void {
     const mapName =
       this.deps.maps.find((m) => m.key === this.loadedKey)?.name ??
       this.loadedKey;
@@ -547,11 +794,12 @@ export class FpsLauncher {
           fullWidth: battle.fullWidth,
           fullHeight: battle.fullHeight,
           nations: battle.nations,
-          playerNation: battle.playerNation,
-          difficulty: this.settings.difficulty,
+          playerNation: side,
+          difficulty,
           playerName: this.deps.playerName || "Player",
-          seed: (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0,
+          seed,
           worldSize: battle.worldSize,
+          net,
         },
         {
           t: this.deps.t,
@@ -563,7 +811,7 @@ export class FpsLauncher {
           onRestart: () => {
             this.game = null;
             container.remove();
-            this.launch(player);
+            restart();
           },
           onSensitivity: (v) => {
             this.settings.sensitivity = v;
@@ -573,6 +821,7 @@ export class FpsLauncher {
       );
     } catch (e) {
       console.error("FPS start failed", e);
+      net?.close();
       container.remove();
       if (!this.setupEl) this.showSetup();
       this.setStatus(this.t("fps.start_failed"), true);
@@ -592,6 +841,8 @@ export class FpsLauncher {
   }
 
   close(): void {
+    this.net?.close();
+    this.net = null;
     this.game?.dispose();
     this.game = null;
     this.root.remove();

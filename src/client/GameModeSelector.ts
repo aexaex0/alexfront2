@@ -453,6 +453,8 @@ export class GameModeSelector extends LitElement {
     if (usernameInput) {
       this.inputValid = usernameInput.canPlay();
     }
+    // A shared link straight into the FPS mode.
+    if (location.hash === "#fps") this.openFps();
   }
 
   disconnectedCallback() {
@@ -679,7 +681,7 @@ export class GameModeSelector extends LitElement {
     // reading-flow keeps focus order following the rows (Chromium only).
     return html`
       <div
-        class="flex flex-col gap-4 w-full px-4 pb-4 mx-auto sm:px-0 sm:pb-0 sm:grid sm:grid-cols-[2fr_1fr] sm:grid-rows-[auto_min(24rem,40vh)_auto_auto] sm:[reading-flow:grid-rows]"
+        class="flex flex-col gap-4 w-full px-4 pb-4 mx-auto sm:px-0 sm:pb-0 sm:grid sm:grid-cols-[2fr_1fr] sm:grid-rows-[auto_min(24rem,40vh)_auto_auto_auto] sm:[reading-flow:grid-rows]"
       >
         <div class="flex flex-col gap-4 sm:col-span-2 sm:row-start-1">
           <ios-add-to-home-screen-banner
@@ -748,8 +750,13 @@ export class GameModeSelector extends LitElement {
           )}
         </div>
 
-        <!-- AlexFront: the last winner, where the quick-play card was. -->
+        <!-- AlexFront 2: the FPS mode is the main attraction. -->
         <div class="min-w-0 sm:col-span-2 sm:row-start-2">
+          ${this.renderFpsCard()}
+        </div>
+
+        <!-- AlexFront: the last winner of the strategy game. -->
+        <div class="min-w-0 sm:col-span-2 sm:row-start-5">
           <last-winner-card></last-winner-card>
         </div>
 
@@ -867,6 +874,58 @@ export class GameModeSelector extends LitElement {
     if (!this.validateUsername()) return;
     window.showPage?.("page-detailed-view");
   };
+
+  /** AlexFront 2: the first-person mode, loaded on demand. */
+  private openFps = () => {
+    const usernameInput = document.querySelector(
+      "username-input",
+    ) as UsernameInput | null;
+    const name = usernameInput?.getUsername() ?? "";
+    void import("./fps/FpsEntry")
+      .then(({ launchFps }) => launchFps(name))
+      .catch((e) => console.error("Could not load the FPS mode", e));
+  };
+
+  private renderFpsCard() {
+    return html`
+      <button
+        type="button"
+        @click=${this.openFps}
+        class="group relative block w-full h-full min-h-48 overflow-hidden rounded-2xl border border-white/15 text-left text-white shadow-2xl transition-transform duration-200 hover:scale-[1.01]"
+        style="background: radial-gradient(ellipse at 78% 35%, rgba(96,165,250,0.5), transparent 55%), radial-gradient(ellipse at 10% 100%, rgba(239,68,68,0.4), transparent 55%), linear-gradient(135deg, #0b1324, #111827 55%, #1e293b);"
+      >
+        <span
+          class="pointer-events-none absolute right-[8%] top-1/2 -translate-y-1/2 size-36 sm:size-48 rounded-full border-4 border-white/25 transition-transform duration-500 group-hover:rotate-90"
+        >
+          <span
+            class="absolute left-1/2 top-[-18%] h-[136%] w-1 -translate-x-1/2 bg-white/25"
+          ></span>
+          <span
+            class="absolute top-1/2 left-[-18%] w-[136%] h-1 -translate-y-1/2 bg-white/25"
+          ></span>
+          <span
+            class="absolute left-1/2 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500"
+          ></span>
+        </span>
+        <span class="relative flex h-full flex-col justify-end gap-2 p-6">
+          <span
+            class="self-start rounded-full bg-red-500 px-3 py-1 text-xs font-black uppercase tracking-widest"
+            >${translateText("fps.menu_badge")}</span
+          >
+          <span class="text-4xl lg:text-5xl font-black tracking-tight"
+            >${translateText("fps.menu_title")}</span
+          >
+          <span class="max-w-[60%] text-base lg:text-lg text-white/80"
+            >${translateText("fps.menu_desc")}</span
+          >
+          <span
+            class="mt-2 self-start rounded-xl bg-green-500 px-6 py-3 text-lg font-black uppercase tracking-wider shadow-lg transition-colors group-hover:bg-green-400"
+            >▶ ${translateText("fps.play")}</span
+          >
+        </span>
+      </button>
+    `;
+  }
 
   private openSinglePlayerModal = () => {
     if (!this.validateUsername()) return;

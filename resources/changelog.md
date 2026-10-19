@@ -1,5 +1,13 @@
 📦 **AlexFront frissítések**
 
+🔫 **2026. október 20. – AlexFront 2: FPS**
+
+- Új játékmód: **FPS Conquest** – első személyű lövölde a térképeken (a főmenü nagy kártyája)
+- Minden nemzetnek egy elfoglalható pontja van; állj a körbe, hogy elfoglald, és tartsd meg a sajátjaidat
+- Gépi katonák minden nemzetnek, 3 nehézségi szint, választható térkép, nemzet és nemzetszám
+- Irányítás: WASD, Shift sprint, Space ugrás, C guggolás, bal klikk lövés, jobb klikk célzás, R újratöltés, Tab eredménytábla
+- Közvetlen link: a cím végére írd, hogy #fps
+
 👀 **2026. október 16. (5. rész)**
 
 - Élő meccsek a főmenü szélén: bármelyikbe beülhetsz nézőként („Watch”)

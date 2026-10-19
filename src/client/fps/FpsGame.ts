@@ -318,6 +318,7 @@ export class FpsGame {
   private snapT = 0;
   private snapN = 0;
   private played = false;
+  private lastChat = -10;
   private yieldTimer = 0;
 
   // Frame scratch
@@ -663,6 +664,15 @@ export class FpsGame {
 
   private onKeyDown = (e: KeyboardEvent) => {
     if (this.state === "ended") return;
+    // Typing a chat message: the keys are for the text box.
+    if (this.hud.chatting) return;
+    if (e.code === "Enter" && this.net && this.state === "playing") {
+      e.preventDefault();
+      this.keys.clear();
+      this.mouseDown = false;
+      this.hud.openChat((text) => this.sendChat(text));
+      return;
+    }
     // Without pointer lock, Esc has to pause by hand.
     if (e.code === "Escape" && this.state === "playing" && this.noLock) {
       this.pause();
@@ -2931,7 +2941,7 @@ export class FpsGame {
   private onNet(from: number, m: NetMsg): void {
     if (m.t === "s") this.applyState(from, m);
     else if (m.t === "w") this.applySnapshot(m);
-    else if (m.t === "e") this.applyEvent(m);
+    else if (m.t === "e") this.applyEvent(m, from);
   }
 
   /** Another player's soldier, as they report it. */
@@ -2946,6 +2956,7 @@ export class FpsGame {
     if (!s) {
       s = this.makeSoldier(team, name, false);
       s.peer = from;
+      s.fireCd = -10;
       s.x = s.tx = x;
       s.y = s.ty = y;
       s.z = s.tz = z;
@@ -3035,6 +3046,7 @@ export class FpsGame {
         b = this.makeSoldier(team, `${this.teams[team].name}`, false);
         b.id = id;
         b.ghost = true;
+        b.fireCd = -10;
         b.x = b.tx = x;
         b.y = b.ty = y;
         b.z = b.tz = z;
@@ -3068,8 +3080,26 @@ export class FpsGame {
     }
   }
 
-  private applyEvent(m: NetMsg): void {
+  private sendChat(raw: string): void {
+    const text = raw.trim().slice(0, 120);
+    if (!text || !this.net) return;
+    if (this.time - this.lastChat < 0.8) return;
+    this.lastChat = this.time;
+    this.net.send({ t: "e", k: "chat", m: text });
+    const team = this.teams[this.player.team];
+    this.hud.addChat(this.opts.playerName, team.css, text, this.time);
+  }
+
+  private applyEvent(m: NetMsg, from: number): void {
     switch (m.k) {
+      case "chat": {
+        if (typeof m.m !== "string") return;
+        const who = this.soldiers.find((s) => s.peer === from);
+        const name = who?.name ?? this.net?.peers.get(from) ?? "?";
+        const css = who ? this.teams[who.team].css : "#ddd";
+        this.hud.addChat(name, css, m.m.slice(0, 120), this.time);
+        return;
+      }
       case "hit": {
         const victim = this.byRef(num(m.v, 0));
         const attacker = this.byRef(num(m.a, 0));
@@ -3153,10 +3183,15 @@ export class FpsGame {
     s.vz = (s.z - pz) / dt;
     const speed = Math.hypot(s.vx, s.vz);
     if (speed > 0.5) s.walk += dt * speed * 1.6;
+    // fireCd counts the time since the last shot (it shows them on the map).
+    s.fireCd -= dt;
     if (s.shots > s.seenShots) {
       const n = Math.min(3, s.shots - s.seenShots);
       s.seenShots = s.shots;
-      if (s.alive) for (let i = 0; i < n; i++) this.remoteShot(s);
+      if (s.alive) {
+        s.fireCd = 0;
+        for (let i = 0; i < n; i++) this.remoteShot(s);
+      }
     }
   }
 

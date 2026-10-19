@@ -134,6 +134,10 @@ const CSS = `
 .fps-minimap{left:16px;top:16px;width:200px;height:200px;padding:4px}
 .fps-minimap canvas{width:100%;height:100%;border-radius:7px;display:block}
 .fps-online{position:absolute;left:16px;top:224px;font-size:13px;font-weight:700;color:#86efac;display:none}
+.fps-chat{position:absolute;left:20px;bottom:120px;width:360px;max-width:calc(100% - 40px);font-size:14px}
+.fps-chat .log div{background:rgba(10,12,16,.5);padding:3px 8px;border-radius:6px;margin-top:3px;word-break:break-word}
+.fps-chat input{display:none;width:100%;margin-top:6px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(10,12,16,.8);color:#fff;font-size:14px;pointer-events:auto}
+.fps-chat.open input{display:block}
 .fps-feed{position:absolute;right:16px;top:16px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:14px;font-weight:600}
 .fps-feed div{background:rgba(10,12,16,.55);padding:3px 9px;border-radius:6px}
 .fps-flash{position:absolute;left:50%;top:30%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px}
@@ -227,6 +231,13 @@ export class FpsHud {
   private miniBg: HTMLCanvasElement;
   private feedBox: HTMLDivElement;
   private flashBox: HTMLDivElement;
+  private chatBox: HTMLDivElement;
+  private chatLog: HTMLDivElement;
+  private chatInput: HTMLInputElement;
+  private chatSend: ((text: string) => void) | null = null;
+  private chatLines: { el: HTMLElement; at: number }[] = [];
+  /** A chat message is being typed. */
+  chatting = false;
   private aimedEl: HTMLDivElement;
   private deadEl: HTMLDivElement;
   private scoreEl: HTMLDivElement;
@@ -293,6 +304,24 @@ export class FpsHud {
 
     this.feedBox = el("div", "fps-feed", root);
     this.flashBox = el("div", "fps-flash", root);
+    this.chatBox = el("div", "fps-chat", root);
+    this.chatLog = el("div", "log", this.chatBox);
+    this.chatInput = el("input", "", this.chatBox);
+    this.chatInput.type = "text";
+    this.chatInput.maxLength = 120;
+    this.chatInput.placeholder = this.t("fps.chat_placeholder");
+    this.chatInput.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        const text = this.chatInput.value;
+        this.closeChat();
+        if (text.trim()) this.chatSend?.(text);
+      } else if (e.key === "Escape") {
+        this.closeChat();
+      }
+    });
+    this.chatInput.addEventListener("keyup", (e) => e.stopPropagation());
+    this.chatInput.addEventListener("blur", () => this.closeChat());
     this.aimedEl = el("div", "fps-aimed", root);
     this.deadEl = el("div", "fps-dead", root);
     this.scoreEl = el("div", "fps-panel fps-score", root);
@@ -451,6 +480,31 @@ export class FpsHud {
     if (this.hurtMarks.length > 6) this.hurtMarks.shift()?.el.remove();
   }
 
+  openChat(send: (text: string) => void): void {
+    this.chatSend = send;
+    this.chatting = true;
+    this.chatBox.classList.add("open");
+    this.chatInput.value = "";
+    this.chatInput.focus();
+  }
+
+  closeChat(): void {
+    if (!this.chatting) return;
+    this.chatting = false;
+    this.chatBox.classList.remove("open");
+    this.chatInput.blur();
+  }
+
+  addChat(name: string, css: string, text: string, now: number): void {
+    const line = el("div", "", this.chatLog);
+    const who = el("b", "", line);
+    who.textContent = `${name}: `;
+    who.style.color = css;
+    line.appendChild(document.createTextNode(text));
+    this.chatLines.push({ el: line, at: now });
+    while (this.chatLines.length > 6) this.chatLines.shift()?.el.remove();
+  }
+
   setScoreboard(on: boolean): void {
     this.scoreVisible = on;
     this.scoreEl.style.display = on ? "block" : "none";
@@ -518,6 +572,13 @@ export class FpsHud {
     }
 
     this.updatePoints(s);
+    // Chat lines fade after a while (all show while typing).
+    for (const c of this.chatLines) {
+      const age = s.time - c.at;
+      c.el.style.opacity = this.chatting
+        ? "1"
+        : String(age < 8 ? 1 : Math.max(0, 1 - (age - 8) / 2));
+    }
     const online = s.online
       ? this.t("fps.online_status", {
           room: s.online.room,

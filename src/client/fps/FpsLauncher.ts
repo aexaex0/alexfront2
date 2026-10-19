@@ -680,6 +680,11 @@ export class FpsLauncher {
   private showJoin(net: FpsNet, cfg: FpsRoomConfig): void {
     const map = this.loaded;
     if (!map) return;
+    // While we sit in this menu we can't run the bots: if hosting falls to
+    // us, hand it to whoever is playing.
+    net.events.onMessage = (_from, m) => {
+      if (m.t === "s" && net.isHost) net.send({ t: "yield" });
+    };
     const battle = prepareBattle(map, cfg.nation, cfg.count);
     this.setupEl?.remove();
     this.ui = null;

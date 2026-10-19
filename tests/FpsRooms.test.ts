@@ -67,14 +67,16 @@ describe("FPS rooms", () => {
     expect(a.sent.length).toBe(before);
   });
 
-  test("hands the room to the next player when the host leaves", () => {
+  test("hands the room to the next player in the battle when the host leaves", () => {
     const rooms = new FpsRooms();
     const a = join(rooms);
     const b = join(rooms);
     const c = join(rooms);
-    const idB = b.sent[0].id as number;
+    const idC = c.sent[0].id as number;
+    // b only sits in the room's menu; c is playing.
+    rooms.message(c, JSON.stringify({ t: "s" }));
     rooms.leave(a);
-    expect(b.sent.some((m) => m.t === "host" && m.id === idB)).toBe(true);
+    expect(b.sent.some((m) => m.t === "host" && m.id === idC)).toBe(true);
     expect(c.sent.some((m) => m.t === "leave")).toBe(true);
     rooms.leave(b);
     rooms.leave(c);
@@ -87,6 +89,11 @@ describe("FPS rooms", () => {
     const b = join(rooms);
     const idA = a.sent[0].id as number;
     const idB = b.sent[0].id as number;
+    // Nobody else is in the battle yet: nothing to hand on.
+    rooms.message(a, JSON.stringify({ t: "yield" }));
+    expect(a.sent.some((m) => m.t === "host")).toBe(false);
+    rooms.message(a, JSON.stringify({ t: "s" }));
+    rooms.message(b, JSON.stringify({ t: "s" }));
     rooms.message(b, JSON.stringify({ t: "yield" }));
     expect(a.sent.some((m) => m.t === "host")).toBe(false);
     rooms.message(a, JSON.stringify({ t: "yield" }));

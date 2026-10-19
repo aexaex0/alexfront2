@@ -19,6 +19,8 @@ interface Member {
   room: Room;
   windowStart: number;
   windowCount: number;
+  /** In the battle (has sent its soldier), not just in the room's menu. */
+  playing: boolean;
 }
 
 interface Room {
@@ -101,14 +103,18 @@ export class FpsRooms {
         return;
       case "yield": {
         // The host steps aside (its tab went to the background, say): the
-        // next player in the room takes over the bots.
-        if (member.id !== room.hostId || room.members.length < 2) return;
-        const i = room.members.indexOf(member);
-        room.hostId = room.members[(i + 1) % room.members.length].id;
+        // next player in the battle takes over the bots.
+        if (member.id !== room.hostId) return;
+        const next = this.nextHost(room, member);
+        if (!next) return;
+        room.hostId = next.id;
         this.broadcast(room, { t: "host", id: room.hostId }, null);
         return;
       }
       case "s":
+        member.playing = true;
+        this.relay(member, raw, typeof m.to === "number" ? m.to : null);
+        return;
       case "e":
         this.relay(member, raw, typeof m.to === "number" ? m.to : null);
         return;
@@ -136,6 +142,7 @@ export class FpsRooms {
       room,
       windowStart: this.now(),
       windowCount: 0,
+      playing: false,
     };
     if (room.members.length === 0) {
       room.hostId = member.id;
@@ -173,10 +180,25 @@ export class FpsRooms {
     }
     this.broadcast(room, { t: "leave", id: member.id }, null);
     if (room.hostId === member.id) {
-      // The longest-connected player takes over the bots.
-      room.hostId = room.members[0].id;
+      // The next player in the battle takes over the bots (or anyone, if
+      // nobody is in the battle yet).
+      room.hostId = (this.nextHost(room, null) ?? room.members[0]).id;
       this.broadcast(room, { t: "host", id: room.hostId }, null);
     }
+  }
+
+  /**
+   * Who hosts after `after` (or from the start): the first member in join
+   * order, after it, who is in the battle.
+   */
+  private nextHost(room: Room, after: Member | null): Member | null {
+    const n = room.members.length;
+    const start = after ? room.members.indexOf(after) + 1 : 0;
+    for (let k = 0; k < n; k++) {
+      const p = room.members[(start + k) % n];
+      if (p !== after && p.playing) return p;
+    }
+    return null;
   }
 
   /** Forwards a member's message as {f: sender, m: message}. */

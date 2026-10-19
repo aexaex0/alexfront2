@@ -679,6 +679,12 @@ export class FpsGame {
     }
     if (e.code === "KeyR") this.reload(this.player);
     if (e.code === "KeyG" && !e.repeat) this.throwGrenade(this.player);
+    if (e.code === "KeyM" && !e.repeat) {
+      this.audio.muted = !this.audio.muted;
+      this.hud.flash(
+        this.deps.t(this.audio.muted ? "fps.sound_off" : "fps.sound_on"),
+      );
+    }
     if (e.code === "KeyC" && !e.repeat) {
       this.player.crouching = !this.player.crouching;
     }
@@ -2277,6 +2283,65 @@ export class FpsGame {
         1,
         this.tmpC,
       );
+    }
+    // Backpack, belt and boots.
+    this.box(
+      "world",
+      0,
+      1.2,
+      0.22,
+      0,
+      0,
+      0,
+      0.4,
+      0.46,
+      0.16,
+      tr * 0.35,
+      tg * 0.35,
+      tb * 0.35,
+      1,
+      P,
+    );
+    this.box(
+      "world",
+      0,
+      0.88,
+      0,
+      0,
+      0,
+      0,
+      0.58,
+      0.07,
+      0.34,
+      0.16,
+      0.13,
+      0.1,
+      1,
+      P,
+    );
+    if (!dead) {
+      for (const side of [-1, 1]) {
+        const sw = swing * side;
+        const bz = Math.sin(sw) * 0.86;
+        const by = 0.86 - Math.cos(sw) * 0.86;
+        this.box(
+          "world",
+          side * 0.13,
+          by + 0.06,
+          bz - 0.03,
+          0,
+          0,
+          0,
+          0.22,
+          0.12,
+          0.3,
+          0.1,
+          0.09,
+          0.08,
+          1,
+          P,
+        );
+      }
     }
     // Torso, head, helmet.
     this.box(

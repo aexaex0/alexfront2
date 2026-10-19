@@ -93,6 +93,7 @@ const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const CSS = `
 .fps-hud{position:absolute;inset:0;pointer-events:none;font-family:"Segoe UI",system-ui,-apple-system,sans-serif;color:#fff;user-select:none;overflow:hidden;z-index:2;text-shadow:0 1px 2px rgba(0,0,0,.8)}
 .fps-hud *{box-sizing:border-box}
+.fps-shade{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 60%,rgba(0,0,0,.28) 100%)}
 .fps-vignette{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 45%,rgba(170,0,0,.85) 100%);opacity:0;transition:opacity .08s}
 .fps-cross{position:absolute;left:50%;top:50%;width:0;height:0}
 .fps-cross i{position:absolute;background:rgba(255,255,255,.92);box-shadow:0 0 2px rgba(0,0,0,.9)}
@@ -250,6 +251,7 @@ export class FpsHud {
     document.head.appendChild(this.style);
     const root = el("div", "fps-hud", container);
     this.root = root;
+    el("div", "fps-shade", root);
     this.vignette = el("div", "fps-vignette", root);
     this.hurt = el("div", "fps-hurt", root);
 

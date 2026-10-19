@@ -1,0 +1,32 @@
+name: Update golden snapshots
+
+# After a deliberate gameplay change shifts a golden test, push a commit whose
+# message contains [update-golden]: this regenerates the golden snapshots and
+# commits them to the branch.
+on:
+  push:
+    branches: [uj-funkciok]
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: contains(github.event.head_commit.message, '[update-golden]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm install --global --ignore-scripts npm@12.1.0
+      - run: npm ci
+      - run: npx vitest tests/NationGoldPerMinute.test.ts --run -u
+      - name: Commit updated snapshot
+        run: |
+          git config user.name aexaex0
+          git config user.email 201080108+aexaex0@users.noreply.github.com
+          git add tests/__snapshots__
+          git diff --cached --quiet || git commit -m "Update golden snapshots"
+          git push

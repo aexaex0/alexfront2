@@ -1,0 +1,183 @@
+{
+  "id": "Budapest",
+  "name": "Budapest",
+  "translation_key": "map.budapest",
+  "categories": ["europe", "countries"],
+  "multiplayer_frequency": 1,
+  "custom_tribes": [
+    "Albertfalva",
+    "Angyalföld",
+    "Békásmegyer",
+    "Budafok",
+    "Cinkota",
+    "Csillaghegy",
+    "Csillagtelep",
+    "Gazdagrét",
+    "Herminamezö",
+    "Káposztásmegyer",
+    "Kelenföld",
+    "Krisztinaváros",
+    "Lágymányos",
+    "Mátyásföld",
+    "Máriaremete",
+    "Nagytétény",
+    "Pasarét",
+    "Pesthidegkút",
+    "Pestszentimre",
+    "Rákoscsaba",
+    "Rákoshegy",
+    "Rákoskeresztúr",
+    "Rákosliget",
+    "Rákospalota",
+    "Rákosszentmihály",
+    "Rózsadomb",
+    "Sashalom",
+    "Svábhegy",
+    "Tabán",
+    "Újpalota",
+    "Vízivaros",
+    "Wekerletelep",
+    "Zugliget"
+  ],
+  "nations": [
+    {
+      "coordinates": [502, 764],
+      "name": "I. Budavár",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [247, 481],
+      "name": "II. kerület",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [497, 363],
+      "name": "III. Óbuda-Békásmegyer",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [762, 244],
+      "name": "IV. Újpest",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [571, 705],
+      "name": "V. Belváros-Lipótváros",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [635, 692],
+      "name": "VI. Terézváros",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [686, 730],
+      "name": "VII. Erzsébetváros",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [746, 814],
+      "name": "VIII. Józsefváros",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [768, 988],
+      "name": "IX. Ferencváros",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1008, 852],
+      "name": "X. Köbánya",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [496, 970],
+      "name": "XI. Újbuda",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [278, 757],
+      "name": "XII. Hegyvidék",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [655, 562],
+      "name": "XIII. kerület",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [818, 650],
+      "name": "XIV. Zugló",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [924, 453],
+      "name": "XV. kerület",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1190, 650],
+      "name": "XVI. kerület",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1456, 906],
+      "name": "XVII. Rákosmente",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1199, 1151],
+      "name": "XVIII. Pestszentlörinc",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [947, 1042],
+      "name": "XIX. Kispest",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [833, 1133],
+      "name": "XX. Pesterzsébet",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [655, 1248],
+      "name": "XXI. Csepel",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [332, 1316],
+      "name": "XXII. Budafok-Tétény",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [954, 1460],
+      "name": "XXIII. Soroksár",
+      "strength": 1,
+      "flag": "hu"
+    }
+  ],
+  "themes": ["europe"]
+}

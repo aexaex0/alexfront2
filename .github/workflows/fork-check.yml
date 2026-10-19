@@ -1,0 +1,24 @@
+name: Fork check
+
+on:
+  push:
+    branches: [uj-funkciok]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm install --global --ignore-scripts npm@12.1.0
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx vitest --run
+      - run: npm run build-prod

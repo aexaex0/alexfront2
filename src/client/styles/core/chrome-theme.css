@@ -1,0 +1,264 @@
+/*
+ * AlexFront UI styles: "Chrome & Silver", "Neon Grid" and "War Ember".
+ *
+ * Any of them puts the `theme-chrome` class on <html> (see UiTheme.ts), and
+ * components opt in with the `chrome:` variant, e.g. `chrome:chrome-panel`.
+ * The style itself is a second class (`theme-neon`, `theme-ember`; Chrome &
+ * Silver has none) that only swaps the CSS variables below, so every
+ * `chrome:` rule restyles with it. Without `theme-chrome` none of this
+ * applies and the classic look is untouched.
+ *
+ * Shadow-DOM components don't see <html>'s class through `.theme-chrome *`;
+ * they put `theme-chrome` on their own root element instead. CSS variables
+ * still inherit into shadow roots, so the style variables reach them.
+ */
+
+@theme {
+  --color-chrome-50: var(--ui-50);
+  --color-chrome-100: var(--ui-100);
+  --color-chrome-200: var(--ui-200);
+  --color-chrome-300: var(--ui-300);
+  --color-chrome-400: var(--ui-400);
+  --color-chrome-500: var(--ui-500);
+  --color-chrome-600: var(--ui-600);
+  --color-chrome-700: var(--ui-700);
+  --color-chrome-800: var(--ui-800);
+  --color-chrome-900: var(--ui-900);
+  --color-chrome-950: var(--ui-950);
+}
+
+/* Chrome & Silver (the default values). */
+:root {
+  --ui-50: #f8f9fb;
+  --ui-100: #eceff3;
+  --ui-200: #d6dbe1;
+  --ui-300: #b9c0c9;
+  --ui-400: #98a1ac;
+  --ui-500: #79838f;
+  --ui-600: #5b6470;
+  --ui-700: #3d444d;
+  --ui-800: #22262c;
+  --ui-900: #121418;
+  --ui-950: #07080a;
+  --ui-panel: linear-gradient(
+    180deg,
+    rgb(32 36 42 / 0.94),
+    rgb(9 10 12 / 0.96)
+  );
+  --ui-frame: linear-gradient(
+    160deg,
+    #f8f9fb 0%,
+    #98a1ac 22%,
+    #e6e9ee 45%,
+    #5b6470 70%,
+    #c9ced6 100%
+  );
+  --ui-frame-soft: rgb(201 206 214 / 0.45);
+  --ui-button: linear-gradient(
+    180deg,
+    #fbfcfd 0%,
+    #d6dbe1 38%,
+    #98a1ac 52%,
+    #c5cbd2 78%,
+    #eef1f4 100%
+  );
+  --ui-button-edge: linear-gradient(180deg, #ffffff, #5b6470);
+  --ui-button-text: #15181c;
+  --ui-button-text-shadow: 0 1px 0 rgb(255 255 255 / 0.6);
+  --ui-button-dark: linear-gradient(
+    180deg,
+    #4a515a 0%,
+    #2a2f35 50%,
+    #1b1e22 100%
+  );
+  --ui-button-dark-hover: linear-gradient(
+    180deg,
+    #5b6470 0%,
+    #3d444d 50%,
+    #22262c 100%
+  );
+  --ui-button-dark-edge: linear-gradient(180deg, #e6e9ee, #5b6470);
+  --ui-button-dark-text: #e6e9ee;
+  --ui-text: linear-gradient(180deg, #ffffff 0%, #aeb5bf 55%, #eef1f4 100%);
+  --ui-bar: linear-gradient(90deg, #5b6470, #f8f9fb, #5b6470);
+  --ui-glow: rgb(0 0 0 / 0.6);
+}
+
+/* Neon Grid: synthwave cyan and magenta on deep night blue. */
+.theme-neon {
+  --ui-50: #ecfeff;
+  --ui-100: #cffafe;
+  --ui-200: #a5f3fc;
+  --ui-300: #67e8f9;
+  --ui-400: #22d3ee;
+  --ui-500: #a855f7;
+  --ui-600: #7e22ce;
+  --ui-700: #312e81;
+  --ui-800: #1e1b4b;
+  --ui-900: #0b0a26;
+  --ui-950: #05041a;
+  --ui-panel: linear-gradient(180deg, rgb(20 16 60 / 0.92), rgb(5 4 26 / 0.96));
+  --ui-frame: linear-gradient(
+    160deg,
+    #22d3ee 0%,
+    #a855f7 40%,
+    #ec4899 70%,
+    #22d3ee 100%
+  );
+  --ui-frame-soft: rgb(34 211 238 / 0.45);
+  --ui-button: linear-gradient(180deg, #67e8f9 0%, #22d3ee 45%, #a855f7 100%);
+  --ui-button-edge: linear-gradient(180deg, #ecfeff, #7e22ce);
+  --ui-button-text: #05041a;
+  --ui-button-text-shadow: 0 1px 0 rgb(236 254 255 / 0.5);
+  --ui-button-dark: linear-gradient(
+    180deg,
+    #312e81 0%,
+    #1e1b4b 55%,
+    #0b0a26 100%
+  );
+  --ui-button-dark-hover: linear-gradient(
+    180deg,
+    #4338ca 0%,
+    #312e81 55%,
+    #1e1b4b 100%
+  );
+  --ui-button-dark-edge: linear-gradient(180deg, #22d3ee, #ec4899);
+  --ui-button-dark-text: #cffafe;
+  --ui-text: linear-gradient(180deg, #ecfeff 0%, #22d3ee 50%, #f0abfc 100%);
+  --ui-bar: linear-gradient(90deg, #ec4899, #22d3ee, #a855f7);
+  --ui-glow: rgb(34 211 238 / 0.35);
+}
+
+/* War Ember: brass, amber and smouldering coals. */
+.theme-ember {
+  --ui-50: #fffbeb;
+  --ui-100: #fef3c7;
+  --ui-200: #fde68a;
+  --ui-300: #fcd34d;
+  --ui-400: #f59e0b;
+  --ui-500: #d97706;
+  --ui-600: #b45309;
+  --ui-700: #7c2d12;
+  --ui-800: #3b1a0c;
+  --ui-900: #1c0d06;
+  --ui-950: #0c0502;
+  --ui-panel: linear-gradient(180deg, rgb(48 24 12 / 0.93), rgb(12 5 2 / 0.97));
+  --ui-frame: linear-gradient(
+    160deg,
+    #fde68a 0%,
+    #b45309 25%,
+    #fcd34d 50%,
+    #7c2d12 75%,
+    #f59e0b 100%
+  );
+  --ui-frame-soft: rgb(245 158 11 / 0.45);
+  --ui-button: linear-gradient(
+    180deg,
+    #fef3c7 0%,
+    #fcd34d 35%,
+    #d97706 60%,
+    #f59e0b 100%
+  );
+  --ui-button-edge: linear-gradient(180deg, #fffbeb, #7c2d12);
+  --ui-button-text: #1c0d06;
+  --ui-button-text-shadow: 0 1px 0 rgb(255 251 235 / 0.5);
+  --ui-button-dark: linear-gradient(
+    180deg,
+    #7c2d12 0%,
+    #3b1a0c 55%,
+    #1c0d06 100%
+  );
+  --ui-button-dark-hover: linear-gradient(
+    180deg,
+    #9a3412 0%,
+    #7c2d12 55%,
+    #3b1a0c 100%
+  );
+  --ui-button-dark-edge: linear-gradient(180deg, #fde68a, #7c2d12);
+  --ui-button-dark-text: #fef3c7;
+  --ui-text: linear-gradient(180deg, #fffbeb 0%, #fcd34d 50%, #f97316 100%);
+  --ui-bar: linear-gradient(90deg, #7c2d12, #fcd34d, #7c2d12);
+  --ui-glow: rgb(249 115 22 / 0.3);
+}
+
+/* Dark, slightly glossy surface inside a polished frame. The frame is a
+   gradient border (padding-box/border-box backgrounds) so it keeps the
+   element's border radius. */
+@utility chrome-panel {
+  background:
+    var(--ui-panel) padding-box,
+    var(--ui-frame) border-box;
+  border: 1px solid transparent;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    0 8px 24px var(--ui-glow);
+}
+
+/* A lighter-weight frame for small boxes and table rows. */
+@utility chrome-frame {
+  border-color: var(--ui-frame-soft);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+/* Main action: shiny button with dark text. */
+@utility chrome-button {
+  background:
+    var(--ui-button) padding-box,
+    var(--ui-button-edge) border-box;
+  border: 1px solid transparent;
+  color: var(--ui-button-text);
+  text-shadow: var(--ui-button-text-shadow);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.9),
+    0 2px 6px var(--ui-glow);
+  &:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  &:active:not(:disabled) {
+    filter: brightness(0.92);
+  }
+  &:disabled {
+    background: linear-gradient(180deg, #4b5157, #2f3338);
+    color: #8a919a;
+    text-shadow: none;
+    box-shadow: none;
+  }
+}
+
+/* Secondary action: dark metal with a bright frame and light text. */
+@utility chrome-button-dark {
+  background:
+    var(--ui-button-dark) padding-box,
+    var(--ui-button-dark-edge) border-box;
+  border: 1px solid transparent;
+  color: var(--ui-button-dark-text);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    0 2px 6px var(--ui-glow);
+  &:hover:not(:disabled) {
+    filter: brightness(1.15);
+  }
+  &:disabled {
+    color: var(--ui-500);
+    filter: none;
+  }
+}
+
+/* Gradient text, for headings. */
+@utility chrome-text {
+  background: var(--ui-text);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+/* Thin polished highlight, e.g. the active tab underline. */
+@utility chrome-bar {
+  background: var(--ui-bar);
+}
+
+/* Styled themes draw their own animated background (<theme-background>), so
+   the classic map backdrop steps aside. */
+.theme-chrome #hex-grid {
+  display: none;
+}

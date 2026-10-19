@@ -1,0 +1,187 @@
+{
+  "id": "Hungary",
+  "name": "Hungary",
+  "translation_key": "map.hungary",
+  "categories": ["europe", "countries"],
+  "multiplayer_frequency": 1,
+  "custom_tribes": [
+    "Ajka",
+    "Baja",
+    "Balassagyarmat",
+    "Békéscsaba",
+    "Cegléd",
+    "Debrecen",
+    "Dunakeszi",
+    "Dunaújváros",
+    "Eger",
+    "Érd",
+    "Esztergom",
+    "Gödöllö",
+    "Gyöngyös",
+    "Györ",
+    "Gyula",
+    "Hajdúböszörmény",
+    "Hatvan",
+    "Hódmezövásárhely",
+    "Jászberény",
+    "Kaposvár",
+    "Karcag",
+    "Kazincbarcika",
+    "Kecskemét",
+    "Keszthely",
+    "Kiskunfélegyháza",
+    "Kiskunhalas",
+    "Köszeg",
+    "Makó",
+    "Miskolc",
+    "Mohács",
+    "Mosonmagyaróvár",
+    "Nagykanizsa",
+    "Nyíregyháza",
+    "Orosháza",
+    "Ózd",
+    "Paks",
+    "Pápa",
+    "Pécs",
+    "Salgótarján",
+    "Sárospatak",
+    "Siófok",
+    "Sopron",
+    "Szeged",
+    "Szekszárd",
+    "Székesfehérvár",
+    "Szentendre",
+    "Szolnok",
+    "Szombathely",
+    "Tata",
+    "Tatabánya",
+    "Tokaj",
+    "Vác",
+    "Várpalota",
+    "Visegrád",
+    "Zalaegerszeg"
+  ],
+  "nations": [
+    {
+      "coordinates": [870, 506],
+      "name": "Budapest",
+      "strength": 3,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1085, 643],
+      "name": "Pest",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [479, 427],
+      "name": "Györ-Moson-Sopron",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [687, 468],
+      "name": "Komárom-Esztergom",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [696, 634],
+      "name": "Fejér",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [552, 676],
+      "name": "Veszprém",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [189, 618],
+      "name": "Vas",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [254, 779],
+      "name": "Zala",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [521, 978],
+      "name": "Somogy",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [642, 1099],
+      "name": "Baranya",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [777, 983],
+      "name": "Tolna",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1054, 750],
+      "name": "Bács-Kiskun",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1180, 1024],
+      "name": "Csongrád-Csanád",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1448, 846],
+      "name": "Békés",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1194, 638],
+      "name": "Jász-Nagykun-Szolnok",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1600, 493],
+      "name": "Hajdú-Bihar",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1625, 315],
+      "name": "Szabolcs-Szatmár-Bereg",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1361, 257],
+      "name": "Borsod-Abaúj-Zemplén",
+      "strength": 2,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1248, 340],
+      "name": "Heves",
+      "strength": 1,
+      "flag": "hu"
+    },
+    {
+      "coordinates": [1085, 257],
+      "name": "Nógrád",
+      "strength": 1,
+      "flag": "hu"
+    }
+  ],
+  "themes": ["europe"]
+}
